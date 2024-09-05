@@ -432,6 +432,7 @@ public void SQL_GetTrackInfo_Callback(Database db, DBResultSet results, const ch
 
 public void Shavit_OnTrackNameUpdated(int track, char[] old_name, int old_size, char[] new_name, int new_size)
 {
+	Shavit_RefreshTracks();
 	SQL_GetTrackInfo(track);
 }
 
@@ -3778,6 +3779,7 @@ public void Shavit_OnDatabaseLoaded()
 
 void RefreshTrackNames()
 {
+	Shavit_RefreshTracks();
 	for (int i; i < TRACKS_SIZE; i++)
 	{
 		if (!Shavit_IsStageValid(i))

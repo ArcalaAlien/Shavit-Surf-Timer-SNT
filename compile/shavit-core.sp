@@ -267,7 +267,6 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_SetOnlyStageMode", Native_SetOnlyStageMode);
 	CreateNative("Shavit_IsClientRepeat", Native_IsClientRepeat);
 	CreateNative("Shavit_SetClientRepeat", Native_SetClientRepeat);
-	CreateNative("Shavit_GetSQLPrefix", Native_GetSQLPrefix);
 
 	// registers library, check "bool LibraryExists(const char[] name)" in order to use with other plugins
 	RegPluginLibrary("shavit");
@@ -2675,11 +2674,6 @@ public int Native_SetOnlyStageMode(Handle handler, int numParams)
 	gA_Timers[GetNativeCell(1)].bOnlyStageMode = GetNativeCell(2);
 
 	return 1;
-}
-
-public void Native_GetSQLPrefix(Handle handler, int numParams)
-{
-	SetNativeString(GetNativeCell(1), gS_MySQLPrefix, GetNativeCell(2));
 }
 
 public int Native_SetClientRepeat(Handle handler, int numParams)
