@@ -14,7 +14,12 @@
 	"HudInStartZone"
 	{
 		"#format"	"{1:s}"
-		"en"		"In {1} Start Zone"	
+		"en"		"{1}: Start"	
+	}
+	"HudInJail"
+	{
+		"#format"   "{1:d}"
+		"en"		"{1}: Jail"
 	}
 	"HudInStartZoneCSGO"
 	{
@@ -29,12 +34,12 @@
 	{
 
 		"#format"	"{1:s}"
-		"en"		"In {1} End Zone"
+		"en"		"{1}: End"
 	}
 	"HudInStageStart"
 	{
 		"#format"	"{1:d}"
-		"en"		"In Stage {1} Start Zone"
+		"en"		"{1}: Start"
 	}
 	"HudInEndZoneCSGO"
 	{
@@ -45,14 +50,9 @@
 	{
 		"en"		"[PAUSED]"
 	}
-	"HudTimeText"
-	{
-		"en"		"Time"
-	}
 	"HudTimerStoppedText"
 	{
-		"#format"	"{1:s}"
-		"en"		"{1} Timer Stopped"
+		"en"		"No Timer"
 	}
 	"HudNoTimerText"
 	{
@@ -86,6 +86,11 @@
 	"HudLinearMap"
 	{
 		"en"		"Linear Map"
+	}
+	"HudSpeedo"
+	{
+		"#format"	"{1:.2f}"
+		"en"		"Speed: {1}"
 	}
 	"HudStrafeText"
 	{
@@ -184,6 +189,10 @@
 	"Hud2dVel"
 	{
 		"en"		"Use 2D Velocity"
+	}
+	"Hud3DVel"
+	{
+		"en"		"Speedometer"
 	}
 	"HudNoRecordSounds"
 	{

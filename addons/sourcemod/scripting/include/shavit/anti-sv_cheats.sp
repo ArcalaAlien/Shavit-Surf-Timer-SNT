@@ -104,30 +104,4 @@ public void sv_cheats_hook(ConVar convar, const char[] oldValue, const char[] ne
 		sv_cheats.SetInt(0);
 	}
 }
-
-public Action Command_Cheats(int client, const char[] command, int args)
-{
-	if (!sv_cheats.BoolValue || client == 0)
-	{
-		return Plugin_Continue;
-	}
-
-	if (StrContains(command, "kill") != -1 || StrContains(command, "explode") != -1)
-	{
-		bool bVector = StrContains(command, "vector") != -1;
-		bool bKillOther = args > (bVector ? 3 : 0);
-
-		if (!bKillOther)
-		{
-			return Plugin_Continue;
-		}
-	}
-
-	if (!(GetUserFlagBits(client) & ADMFLAG_ROOT))
-	{
-		return Plugin_Stop;
-	}
-
-	return Plugin_Continue;
-}
 #endif

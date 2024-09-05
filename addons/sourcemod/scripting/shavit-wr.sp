@@ -22,14 +22,19 @@
 #include <sourcemod>
 #include <convar_class>
 #include <dhooks>
+#include <morecolors>
 
 #include <shavit/core>
 #include <shavit/wr>
 #include <shavit/steamid-stocks>
 
+#include <stocksoup/tf/entity_prefabs>
+
 #undef REQUIRE_PLUGIN
 #include <shavit/rankings>
 #include <shavit/zones>
+#include <sntdb_core>
+#include <sntdb_store>
 #include <adminmenu>
 
 #pragma newdecls required
@@ -75,12 +80,21 @@ int gI_Driver = Driver_unknown;
 Database gH_SQL = null;
 bool gB_Connected = false;
 
+// sntdb stuff
+char sntdb_SchemaName[64];
+char sntdb_StoreSchema[64];
+char sntdb_CurrencyName[64];
+char sntdb_CurrencyColor[64];
+char sntdb_Prefix[96];
+char stndb_ConfName[64];
+
 // cache
 wrcache_t gA_WRCache[MAXPLAYERS+1];
 StringMap gSM_StyleCommands = null;
 
 char gS_Map[PLATFORM_MAX_PATH];
 ArrayList gA_ValidMaps = null;
+track_info currentTrackInfo[TRACKS_SIZE];
 
 // current wr stats
 float gF_WRTime[STYLE_LIMIT][TRACKS_SIZE];
@@ -113,7 +127,6 @@ char gS_MySQLPrefix[32];
 Convar gCV_RecordsLimit = null;
 Convar gCV_RecentLimit = null;
 
-
 // timer settings
 int gI_Styles = 0;
 stylestrings_t gS_StyleStrings[STYLE_LIMIT];
@@ -125,6 +138,8 @@ chatstrings_t gS_ChatStrings;
 float gA_StageCP_WR[STYLE_LIMIT][TRACKS_SIZE][MAX_STAGES]; // WR run's stage times
 ArrayList gA_StageCP_PB[MAXPLAYERS+1][STYLE_LIMIT][TRACKS_SIZE]; // player's best WRCP times or something
 
+// Payouts
+payout_info Payouts;
 
 Menu gH_PBMenu[MAXPLAYERS+1];
 int gI_PBMenuPos[MAXPLAYERS+1];
@@ -135,7 +150,7 @@ bool gB_RRSelectStage[MAXPLAYERS+1];
 public Plugin myinfo =
 {
 	name = "[shavit-surf] World Records",
-	author = "shavit, SaengerItsWar, KiD Fearless, rtldg, BoomShotKapow, Nuko",
+	author = "shavit, SaengerItsWar, KiD Fearless, rtldg, BoomShotKapow, Nuko EDIT BY: Arcala the Gyiyg",
 	description = "World records shavit surf timer. (This plugin is base on shavit's bhop timer)",
 	version = SHAVIT_SURF_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -259,6 +274,7 @@ public void OnPluginStart()
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
 		Shavit_OnChatConfigLoaded();
 		Shavit_OnDatabaseLoaded();
+		
 
 		if (gB_AdminMenu && (gH_AdminMenu = GetAdminTopMenu()) != null)
 		{
@@ -266,7 +282,23 @@ public void OnPluginStart()
 		}
 	}
 
-	CreateTimer(2.5, Timer_Dominating, 0, TIMER_REPEAT);
+	char sntdb_ConfName[64];
+	int credits;
+	float mins;
+	LoadSQLStoreConfigs(sntdb_ConfName, sizeof(sntdb_ConfName),
+						sntdb_Prefix, sizeof(sntdb_Prefix),
+						sntdb_SchemaName, sizeof(sntdb_SchemaName),
+						"shavit-wr",
+						sntdb_CurrencyName, sizeof(sntdb_CurrencyName),
+						sntdb_CurrencyColor, sizeof(sntdb_CurrencyColor),
+						credits, mins);
+
+    char error[255];
+
+    if (!StrEqual(error, ""))
+    {
+        ThrowError("[SNT] ERROR IN PLUGIN START: %s", error);
+    }
 }
 
 public void OnAdminMenuReady(Handle topmenu)
@@ -364,6 +396,46 @@ public void OnLibraryRemoved(const char[] name)
 	}
 }
 
+void SQL_GetTrackInfo(int track)
+{
+	char currentMap[64];
+	GetCurrentMap(currentMap, sizeof(currentMap));
+	
+	char sQuery[512];
+	FormatEx(sQuery, sizeof(sQuery), "SELECT track_name " 
+								  ..."FROM %smapzones "
+								  ..."WHERE (map=\"%s\" AND track=\"%i\");",
+									 gS_MySQLPrefix, currentMap, track);
+
+	SQL_TQuery(gH_SQL, SQL_GetTrackInfo_Callback, sQuery, track);
+}
+
+public void SQL_GetTrackInfo_Callback(Database db, DBResultSet results, const char[] error, any track)
+{
+	if (results == null)
+	{
+		LogError("[SQL_GetTrackInfo_Callback] Unable to get track info from database (Reason: %s)", error);
+		return;
+	}
+
+	while (SQL_FetchRow(results))
+	{
+		char sResult[64];
+		SQL_FetchString(results, 0, sResult, sizeof(sResult));
+		if (!StrEqual(sResult, "HANDLED_BY_PLUGIN"))
+		{
+			currentTrackInfo[track].bTrackHasCustomName = true;
+			Format(currentTrackInfo[track].trackName, sizeof(currentTrackInfo.trackName), "%s", sResult);
+		}
+	}	
+}
+
+public void Shavit_OnTrackNameUpdated(int track, char[] old_name, int old_size, char[] new_name, int new_size)
+{
+	Shavit_RefreshTracks();
+	SQL_GetTrackInfo(track);
+}
+
 public Action Timer_Dominating(Handle timer)
 {
 	bool bHasWR[MAXPLAYERS+1];
@@ -375,19 +447,8 @@ public Action Timer_Dominating(Handle timer)
 			char sSteamID[20];
 			IntToString(GetSteamAccountID(i), sSteamID, sizeof(sSteamID));
 			bHasWR[i] = gSM_WRNames.GetString(sSteamID, sSteamID, sizeof(sSteamID));
-		}
-	}
-
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if (!IsValidClient(i))
-		{
-			continue;
-		}
-
-		for (int x = 1; x <= MaxClients; x++)
-		{
-			SetEntProp(i, Prop_Send, "m_bPlayerDominatingMe", bHasWR[x], 1, x);
+			if (bHasWR[i])
+				TF2_AttachColoredGlow(i, {255, 0, 255, 255});
 		}
 	}
 
@@ -452,8 +513,34 @@ void ResetStageLeaderboards()
 	}
 }
 
+void GetPayoutAmounts()
+{
+	char sPath[PLATFORM_MAX_PATH];
+	BuildPath(Path_SM, sPath, PLATFORM_MAX_PATH, "configs/shavit-payouts.cfg");
+
+	KeyValues kv = new KeyValues("Payouts");
+
+	if(!kv.ImportFromFile(sPath))
+	{
+		LogError("Unable to load configs/shavit-payouts.cfg");
+		delete kv;
+		return;
+	}
+
+	kv.JumpToKey("Amounts");
+	Payouts.iWorldRecord = kv.GetNum("WorldRecord");
+	Payouts.iNewPersonalBest = kv.GetNum("NewPersonalBest");
+	Payouts.iRegularFinish = kv.GetNum("RegularFinish");
+
+	PrintToServer("Payouts:\nWorldRecord: %i\nNewPersonalBest: %i\nRegularFinish: %i", Payouts.iWorldRecord, Payouts.iNewPersonalBest, Payouts.iRegularFinish);
+
+	delete kv;
+}
+
 public void OnMapStart()
 {
+	GetPayoutAmounts();
+
 	if(!gB_Connected)
 	{
 		return;
@@ -1497,7 +1584,7 @@ public Action Command_Delete(int client, int args)
 		int records = GetTrackRecordCount(i);
 
 		char sTrack[64];
-		GetTrackName(client, i, sTrack, 64);
+		GetTrackName(client, i, currentTrackInfo[i], sTrack, 64);
 
 		if(records > 0)
 		{
@@ -1671,7 +1758,7 @@ public int MenuHandler_DeleteAll_Stage_Second(Menu menu, MenuAction action, int 
 void DeleteAllStageSubmenu(int client)
 {
 	char sTrack[32];
-	GetTrackName(client, gA_WRCache[client].iLastTrack, sTrack, 32);
+	GetTrackName(client, gA_WRCache[client].iLastTrack, currentTrackInfo[gA_WRCache[client].iLastTrack], sTrack, 32);
 
 	Menu menu = new Menu(MenuHandler_DeleteAllStage);
 	menu.SetTitle("%T\n ", "DeleteAllRecordsMenuTitle", client, gS_Map, "Stage", sTrack, gS_StyleStrings[gA_WRCache[client].iLastStyle].sStyleName);
@@ -1752,7 +1839,7 @@ public Action Command_DeleteAll(int client, int args)
 		int iRecords = GetTrackRecordCount(i);
 
 		char sTrack[64];
-		GetTrackName(client, i, sTrack, 64);
+		GetTrackName(client, i, currentTrackInfo[i], sTrack, 64);
 
 		if(iRecords > 0)
 		{
@@ -1778,7 +1865,7 @@ public int MenuHandler_DeleteAll_First(Menu menu, MenuAction action, int param1,
 		gA_WRCache[param1].iLastStage = 0;
 
 		char sTrack[64];
-		GetTrackName(param1, iTrack, sTrack, 64);
+		GetTrackName(param1, iTrack, currentTrackInfo[iTrack], sTrack, 64);
 
 		Menu subMenu = new Menu(MenuHandler_DeleteAll_Second);
 		subMenu.SetTitle("%T\n ", "DeleteTrackAllStyle", param1, sTrack);
@@ -1846,7 +1933,7 @@ public int MenuHandler_DeleteAll_Second(Menu menu, MenuAction action, int param1
 void DeleteAllSubmenu(int client)
 {
 	char sTrack[32];
-	GetTrackName(client, gA_WRCache[client].iLastTrack, sTrack, 32);
+	GetTrackName(client, gA_WRCache[client].iLastTrack, currentTrackInfo[gA_WRCache[client].iLastTrack], sTrack, 32);
 
 	Menu menu = new Menu(MenuHandler_DeleteAll);
 	menu.SetTitle("%T\n ", "DeleteAllRecordsMenuTitle", client, gS_Map, "Track", sTrack, gS_StyleStrings[gA_WRCache[client].iLastStyle].sStyleName);
@@ -1887,7 +1974,7 @@ public int MenuHandler_DeleteAll(Menu menu, MenuAction action, int param1, int p
 		}
 
 		char sTrack[32];
-		GetTrackName(LANG_SERVER, gA_WRCache[param1].iLastTrack, sTrack, 32);
+		GetTrackName(LANG_SERVER, gA_WRCache[param1].iLastTrack, currentTrackInfo[gA_WRCache[param1].iLastTrack], sTrack, 32);
 
 		Shavit_LogMessage("%L - deleted all %s track and %s style records from map `%s`.",
 			param1, sTrack, gS_StyleStrings[gA_WRCache[param1].iLastStyle].sStyleName, gS_Map);
@@ -1971,7 +2058,7 @@ public void SQL_OpenDelete_Callback(Database db, DBResultSet results, const char
 
 	if (gA_WRCache[client].iLastStage == 0)
 	{
-		GetTrackName(client, gA_WRCache[client].iLastTrack, sTrack, sizeof(sTrack));
+		GetTrackName(client, gA_WRCache[client].iLastTrack, currentTrackInfo[gA_WRCache[client].iLastTrack], sTrack, sizeof(sTrack));
 	}
 	else
 	{
@@ -2282,7 +2369,7 @@ public void DeleteConfirm_Callback(Database db, DBResultSet results, const char[
 	}
 
 	char sTrack[32];
-	GetTrackName(LANG_SERVER, iTrack, sTrack, 32);
+	GetTrackName(LANG_SERVER, iTrack, currentTrackInfo[iTrack], sTrack, 32);
 	
 	char sStage[32];
 	FormatEx(sStage, sizeof(sStage), "| Stage: %d ", iStage);
@@ -2852,7 +2939,7 @@ public void SQL_WR_Callback(Database db, DBResultSet results, const char[] error
 		char sTrack[32];
 		if(stage == 0)
 		{
-			GetTrackName(client, track, sTrack, 32);
+			GetTrackName(client, track, currentTrackInfo[track], sTrack, 32);
 		}
 		else
 		{
@@ -3087,7 +3174,7 @@ public void SQL_RR_Callback(Database db, DBResultSet results, const char[] error
 
 		if(stage == 0)
 		{
-			GetTrackName(client, track, sTrack, 32);
+			GetTrackName(client, track, currentTrackInfo[track], sTrack, 32);
 		}
 		else
 		{
@@ -3311,7 +3398,7 @@ public void SQL_PersonalBest_Callback(Database db, DBResultSet results, const ch
 		}
 
 		char track_name[32];
-		GetTrackName(client, track, track_name, sizeof(track_name));
+		GetTrackName(client, track, currentTrackInfo[track], track_name, sizeof(track_name));
 
 		char formated_time[32];
 		FormatSeconds(time, formated_time, sizeof(formated_time));
@@ -3499,7 +3586,7 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 
 		if (stage == 0)
 		{
-			GetTrackName(client, results.FetchInt(11), sTrack, 32);
+			GetTrackName(client, results.FetchInt(11), currentTrackInfo[results.FetchInt(11)], sTrack, 32);
 		}
 		else
 		{
@@ -3686,7 +3773,20 @@ public void Shavit_OnDatabaseLoaded()
 	gH_SQL = Shavit_GetDatabase(gI_Driver);
 
 	gB_Connected = true;
+	RefreshTrackNames();
 	OnMapStart();
+}
+
+void RefreshTrackNames()
+{
+	Shavit_RefreshTracks();
+	for (int i; i < TRACKS_SIZE; i++)
+	{
+		if (!Shavit_IsStageValid(i))
+			continue;
+		
+		SQL_GetTrackInfo(i);
+	}
 }
 
 
@@ -3703,7 +3803,9 @@ public void Shavit_OnFinishStage(int client, int track, int style, int stage, fl
 	int iSteamID = GetSteamAccountID(client);
 
 	char sTrack[32];
-	GetTrackName(LANG_SERVER, track, sTrack, 32);
+	GetTrackName(LANG_SERVER, track, currentTrackInfo[track], sTrack, 32);
+
+	PrintToServer("User finished track: %i", sTrack);
 
 	if(Shavit_GetStyleSettingInt(style, "unranked") || Shavit_IsPracticeMode(client))
 	{
@@ -4026,7 +4128,7 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 	FormatSeconds(time, sTime, 32);
 
 	char sTrack[32];
-	GetTrackName(LANG_SERVER, track, sTrack, 32);
+	GetTrackName(LANG_SERVER, track, currentTrackInfo[track], sTrack, 32);
 
 	// 0 - no query
 	// 1 - insert
@@ -4065,6 +4167,9 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 
 	if(iOverwrite > 0 && (time < gF_WRTime[style][track] || bServerFirstCompletion)) // WR?
 	{
+		CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}world {orchid}record!{default}\n[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iWorldRecord, sntdb_CurrencyColor, sntdb_CurrencyName);
+		SNT_AddCredits(client, Payouts.iWorldRecord);
+
 		float fOldWR = gF_WRTime[style][track];
 		gF_WRTime[style][track] = time;
 
@@ -4164,6 +4269,8 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable, iRank,
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable, 1,
 					gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
+					CPrintToChat(client, "%s {greenyellow}You finished the stage!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
+					SNT_AddCredits(client, Payouts.iRegularFinish);
 			}
 			else
 			{
@@ -4176,6 +4283,8 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 					gS_ChatStrings.sVariable, iRank,
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable, iRankCount + 1,
 					gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
+					CPrintToChat(client, "%s {greenyellow}You finished the stage!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
+					SNT_AddCredits(client, Payouts.iRegularFinish);
 			}
 
 			FormatEx(sQuery, sizeof(sQuery),
@@ -4184,6 +4293,9 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 		}
 		else // Better than PB, Maybe Beat the wr
 		{
+			CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}personal {orchid}best!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iNewPersonalBest, sntdb_CurrencyColor, sntdb_CurrencyName);
+			SNT_AddCredits(client, Payouts.iNewPersonalBest);
+
 			FormatEx(sMessage, 255, "%T",
 				"NotFirstCompletion", LANG_SERVER, 
 				gS_ChatStrings.sVariable2, sName, 
@@ -4237,6 +4349,9 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 
 		if(iOverwrite == 0 && !Shavit_GetStyleSettingInt(style, "unranked"))
 		{
+			CPrintToChat(client, "%s {greenyellow}You finished the stage!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
+			SNT_AddCredits(client, Payouts.iRegularFinish);
+
 			FormatEx(sMessage, 255, "%T",
 				"WorseTime", client, 
 				gS_ChatStrings.sVariable, sTrack, 

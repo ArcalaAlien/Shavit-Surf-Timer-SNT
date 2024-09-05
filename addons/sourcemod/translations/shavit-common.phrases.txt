@@ -11,8 +11,15 @@
 	}
 	"Track_Main"
 	{
-		"en"		"Main"
+		"en"		"Main Surf"
 	}
+
+	"Track_Stage"
+	{
+		"#format" 	"{1:d}"
+		"en"		"Stage {1}"
+	}
+
 	"Track_Bonus"
 	{
 		"#format"	"{1:d}"
@@ -20,7 +27,7 @@
 	}
 	"Track_Bonus_NoNum"
 	{
-		"en"		"Bonus"
+		"en"		"Bonus Surf"
 	}
 	// ---------- Commands ---------- //
 	"NoCommandAccess"

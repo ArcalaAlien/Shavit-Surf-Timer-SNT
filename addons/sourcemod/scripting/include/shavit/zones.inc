@@ -24,17 +24,18 @@
 #endif
 #define _shavit_zones_included
 
-#define MAX_ZONES 128
+#define MAX_ZONES 512
 #define MAX_STAGES 64
 
 enum
 {
 	Zone_Start, 			// starts timer
 	Zone_End, 				// stops timer
-	Zone_Stage,				// as a start zone in stageed map
-	Zone_Checkpoint,		// shows time when entering zone	
-	Zone_Respawn, 			// respawns the player
+	Zone_Secret, 			// stops the player's timer and prints a secret message.
 	Zone_Stop,				// stops the player's timer
+	Zone_Cheater,
+	Zone_Stage,
+	Zone_Checkpoint,
 	Zone_Slay,				// slays (kills) players which come to this zone
 	Zone_Freestyle,			// ignores style physics when at this zone. e.g. WASD when SWing
 	Zone_CustomSpeedLimit,	// overwrites velocity limit in the zone
@@ -106,7 +107,7 @@ enum
 enum struct zone_cache_t
 {
 	int iType; // The type of zone. Zone_Start, Zone_End, etc...
-	int iTrack; // 0 - main, 1 - bonus1 etc
+	int iTrack; // 0-16 Main, 17-32 bonus1 etc
 	int iEntity; // Filled by Shavit_GetZone() if applicable.
 	int iDatabaseID; // Can be the database ID (> 0) for "sql" sources. Non-sql sources can fill this with whatever.
 	int iFlags; // The ZF_* flags.
@@ -125,10 +126,11 @@ stock void GetZoneName(int client, int zoneType, char[] output, int size)
 	static char sTranslationStrings[ZONETYPES_SIZE][] = {
 		"Zone_Start",
 		"Zone_End",
-		"Zone_Stage",	
-		"Zone_Checkpoint",
-		"Zone_Respawn",
+		"Zone_Secret",
 		"Zone_Stop",
+		"Zone_Cheater",
+		"Zone_Stage",
+		"Zone_Checkpoint",
 		"Zone_Slay",
 		"Zone_Freestyle",
 		"Zone_CustomSpeedLimit",
@@ -149,9 +151,9 @@ stock void GetZoneName(int client, int zoneType, char[] output, int size)
 }
 
 // Please follow something like this:
-//   mod_zone_start
-//   mod_zone_end
-//   mod_zone_checkpoint_X
+//   mod_zone_stage_X_start
+//   mod_zone_stage_X_end
+//   mod_zone_stage_X_checkpoint_X
 //   mod_zone_bonus_X_start
 //   mod_zone_bonus_X_end
 //   mod_zone_bonus_X_checkpoint_X
@@ -186,8 +188,26 @@ stock bool Shavit_ParseZoneTargetname(const char[] targetname, bool button, int&
 		type = Zone_End;
 	}
 
+	int isStage = StrContains(targetname, "stage");
 	int bonus = StrContains(targetname, "bonus");
 
+	if (isStage != -1)
+	{
+		track = Track_Main;
+		isStage += 5; // skip past "isStage"
+		if (targetname[isStage] == '_') isStage += 1;
+
+		if ('1' <= targetname[isStage] <= '9')
+		{
+			track = StringToInt(targetname[isStage]);
+
+			if (track < Track_Main || track > Track_Stage_Last)
+			{
+				if (mapname_for_log[0]) LogError("invalid track in prebuilt map zone (%s) on %s", targetname, mapname_for_log);
+				return false;
+			}
+		}
+	}
 	if (bonus != -1)
 	{
 		track = Track_Bonus;
@@ -196,7 +216,7 @@ stock bool Shavit_ParseZoneTargetname(const char[] targetname, bool button, int&
 
 		if ('1' <= targetname[bonus] <= '9')
 		{
-			track = StringToInt(targetname[bonus]);
+			track = (StringToInt(targetname[bonus]) + 16);
 
 			if (track < Track_Bonus || track > Track_Bonus_Last)
 			{
@@ -516,6 +536,15 @@ native int Shavit_AddZone(any[] zonecache, int size = sizeof(zone_cache_t));
  * @noreturn
  */
 native void Shavit_RemoveZone(int index);
+
+/**
+ *  Checks to see if a track has valid zone data.
+ * 
+ * @param track
+ * 
+ * @return true / false
+ */
+native bool Shavit_IsStageValid(int track);
 
 
 public SharedPlugin __pl_shavit_zones =

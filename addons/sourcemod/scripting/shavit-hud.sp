@@ -119,6 +119,7 @@ bool gB_AlternateCenterKeys[MAXPLAYERS+1]; // use for css linux gamers
 // hud handle
 Handle gH_HUDTopleft = null;
 Handle gH_HUDCenter = null;
+Handle gH_UpdateTimer[MAXPLAYERS+1] = { INVALID_HANDLE, ... };
 
 // plugin cvars
 Convar gCV_GradientStepSize = null;
@@ -133,6 +134,12 @@ Convar gCV_DefaultHUD2 = null;
 // timer settings
 stylestrings_t gS_StyleStrings[STYLE_LIMIT];
 chatstrings_t gS_ChatStrings;
+
+// track stuff
+track_info currentTrackInfo[TRACKS_SIZE];
+
+// Database stuff
+Database gH_SQL = null;
 
 public Plugin myinfo =
 {
@@ -181,6 +188,7 @@ public void OnPluginStart()
 	{
 		HookEvent("player_changeclass", Player_ChangeClass);
 		HookEvent("player_team", Player_ChangeClass);
+		HookEvent("post_inventory_application", Player_ChangeClass);
 		HookEvent("teamplay_round_start", Teamplay_Round_Start);
 	}
 	else if (gEV_Type == Engine_CSS)
@@ -228,6 +236,7 @@ public void OnPluginStart()
 		..."HUD_USP                  8192\n"
 		..."HUD_GLOCK                16384\n"
 		..."HUD_SPECTATORSDEAD       65536\n"
+		..."HUD_3DVEL				 131072\n"
 	);
 
 	IntToString(HUD_DEFAULT2, defaultHUD, 8);
@@ -270,23 +279,23 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_master", Command_Master, "Toggles HUD.");
 	RegConsoleCmd("sm_masterhud", Command_Master, "Toggles HUD. (alias for sm_master)");
 
-	RegConsoleCmd("sm_center", Command_Center, "Toggles center text HUD.");
-	RegConsoleCmd("sm_centerhud", Command_Center, "Toggles center text HUD. (alias for sm_center)");
+	// RegConsoleCmd("sm_center", Command_Center, "Toggles center text HUD.");
+	// RegConsoleCmd("sm_centerhud", Command_Center, "Toggles center text HUD. (alias for sm_center)");
 
-	RegConsoleCmd("sm_zonehud", Command_ZoneHUD, "Toggles zone HUD.");
+	// RegConsoleCmd("sm_zonehud", Command_ZoneHUD, "Toggles zone HUD.");
 
-	RegConsoleCmd("sm_hideweapon", Command_HideWeapon, "Toggles weapon hiding.");
-	RegConsoleCmd("sm_hideweap", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
-	RegConsoleCmd("sm_hideweps", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
-	RegConsoleCmd("sm_hidewep", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
+	// RegConsoleCmd("sm_hideweapon", Command_HideWeapon, "Toggles weapon hiding.");
+	// RegConsoleCmd("sm_hideweap", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
+	// RegConsoleCmd("sm_hideweps", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
+	// RegConsoleCmd("sm_hidewep", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
 
-	RegConsoleCmd("sm_truevel", Command_TrueVel, "Toggles 2D ('true') velocity.");
-	RegConsoleCmd("sm_truvel", Command_TrueVel, "Toggles 2D ('true') velocity. (alias for sm_truevel)");
-	RegConsoleCmd("sm_2dvel", Command_TrueVel, "Toggles 2D ('true') velocity. (alias for sm_truevel)");
+	// RegConsoleCmd("sm_truevel", Command_TrueVel, "Toggles 2D ('true') velocity.");
+	// RegConsoleCmd("sm_truvel", Command_TrueVel, "Toggles 2D ('true') velocity. (alias for sm_truevel)");
+	// RegConsoleCmd("sm_2dvel", Command_TrueVel, "Toggles 2D ('true') velocity. (alias for sm_truevel)");
 
-	AddCommandListener(Command_SpecNextPrev, "spec_player");
-	AddCommandListener(Command_SpecNextPrev, "spec_next");
-	AddCommandListener(Command_SpecNextPrev, "spec_prev");
+	// AddCommandListener(Command_SpecNextPrev, "spec_player");
+	// AddCommandListener(Command_SpecNextPrev, "spec_next");
+	// AddCommandListener(Command_SpecNextPrev, "spec_prev");
 
 	// cookies
 	gH_HUDCookie = RegClientCookie("shavit_hud_setting", "HUD settings", CookieAccess_Protected);
@@ -382,6 +391,8 @@ public void OnConfigsExecuted()
 	{
 		sv_hudhint_sound.SetBool(false);
 	}
+
+	RefreshTrackNames();
 }
 
 public void Shavit_OnStyleConfigLoaded(int styles)
@@ -499,11 +510,15 @@ public void BotPostThinkPost(int client)
 
 public void OnClientCookiesCached(int client)
 {
+	PrintToServer("Cookies cached for client %i!", client);
 	char sHUDSettings[12];
 	GetClientCookie(client, gH_HUDCookie, sHUDSettings, sizeof(sHUDSettings));
+	PrintToServer("sHudSettings: %s", sHUDSettings);
+
 
 	if(strlen(sHUDSettings) == 0)
 	{
+		PrintToServer("Giving client default hud.");
 		gCV_DefaultHUD.GetString(sHUDSettings, sizeof(sHUDSettings));
 		SetClientCookie(client, gH_HUDCookie, sHUDSettings);
 	}
@@ -636,6 +651,7 @@ void ToggleHUD(int client, int hud, bool chat)
 			case HUD_2DVEL: FormatEx(sHUDSetting, 64, "%T", "Hud2dVel", client);
 			case HUD_NOSOUNDS: FormatEx(sHUDSetting, 64, "%T", "HudNoRecordSounds", client);
 			case HUD_NOPRACALERT: FormatEx(sHUDSetting, 64, "%T", "HudPracticeModeAlert", client);
+			case HUD_3DVEL: FormatEx(sHUDSetting, 64, "%T", "Hud3DVel", client);
 		}
 
 		if((gI_HUDSettings[client] & hud) > 0)
@@ -733,7 +749,7 @@ Action ShowHUDMenu(int client, int item)
 	// HUD Center Text
 	FormatEx(sInfo, 16, "!%d", HUD_CENTER);
 	FormatEx(sHudItem, 64, "%T", "HudCenter", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	FormatEx(sInfo, 16, "!%d", HUD_ZONEHUD);
 	FormatEx(sHudItem, 64, "%T", "HudZoneHud", client);
@@ -741,7 +757,7 @@ Action ShowHUDMenu(int client, int item)
 
 	FormatEx(sInfo, 16, "@%d", HUD2_TIME);
 	FormatEx(sHudItem, 64, "%T", "HudTimeText", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	FormatEx(sInfo, 16, "@%d", HUD2_RANK);
 	FormatEx(sHudItem, 64, "%T", "HudRankText", client);
@@ -776,7 +792,7 @@ Action ShowHUDMenu(int client, int item)
 
 	FormatEx(sInfo, 16, "@%d", HUD2_SYNC);
 	FormatEx(sHudItem, 64, "%T", "HudSync", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	FormatEx(sInfo, 16, "@%d", HUD2_SPEED);
 	FormatEx(sHudItem, 64, "%T", "HudSpeedText", client);
@@ -803,24 +819,28 @@ Action ShowHUDMenu(int client, int item)
 	{
 		FormatEx(sInfo, 16, "!%d", HUD_TIMELEFT);
 		FormatEx(sHudItem, 64, "%T", "HudTimeLeft", client);
-		menu.AddItem(sInfo, sHudItem);
+		//menu.AddItem(sInfo, sHudItem);
 	}
 
 	FormatEx(sInfo, 16, "@%d", HUD2_STYLE);
 	FormatEx(sHudItem, 64, "%T", "HudStyleText", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 	
 	FormatEx(sInfo, 16, "!%d", HUD_WRPB);
 	FormatEx(sHudItem, 64, "%T", "HudWRPB", client);
 	menu.AddItem(sInfo, sHudItem);
 
+	FormatEx(sInfo, 16, "!%d", HUD_3DVEL);
+	FormatEx(sHudItem, 64, "%T", "Hud3DVel", client);
+	menu.AddItem(sInfo, sHudItem);
+
 	FormatEx(sInfo, 16, "@%d", HUD2_STAGEWRPB);
 	FormatEx(sHudItem, 64, "%T", "HudStageWRPB", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	FormatEx(sInfo, 16, "@%d", HUD2_SPLITPB);
 	FormatEx(sHudItem, 64, "%T", "HudSplitPbText", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 
 	//misc
@@ -834,11 +854,11 @@ Action ShowHUDMenu(int client, int item)
 
 	FormatEx(sInfo, 16, "!%d", HUD_SPEEDTRAP);
 	FormatEx(sHudItem, 64, "%T", "HudSpeedTrap", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	FormatEx(sInfo, 16, "!%d", HUD_2DVEL);
 	FormatEx(sHudItem, 64, "%T", "Hud2dVel", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	if(gB_Sounds)
 	{
@@ -1063,12 +1083,20 @@ void GivePlayerDefaultGun(int client)
 	FakeClientCommand(client, "use %s", sWeapon);
 }
 
+public Action Timer_UpdateKeyHint(Handle timer, any data)
+{
+	UpdateKeyHint(data, true);
+	return Plugin_Continue;
+}
+
 public void Player_Spawn(Event event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 
 	if (!IsFakeClient(client))
 	{
+		if (gH_UpdateTimer[client] == INVALID_HANDLE)
+			gH_UpdateTimer[client] = CreateTimer(0.1, Timer_UpdateKeyHint, client, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 		if (gEV_Type != Engine_TF2)
 		{
 			GivePlayerDefaultGun(client);
@@ -1199,7 +1227,7 @@ void TriggerHUDUpdate(int client, bool keysonly = false) // keysonly because CS:
 
 	if (draw_rampspeed || (draw_keys && center_keys))
 	{
-		UpdateCenterText(client, draw_keys, draw_rampspeed);
+		//UpdateCenterText(client, draw_keys, draw_rampspeed);
 	}
 
 	if(IsSource2013(gEV_Type))
@@ -1279,8 +1307,86 @@ int GetGradient(int start, int end, int steps)
 	return GetHex(aColorGradient);
 }
 
+public void Shavit_OnDatabaseLoaded()
+{
+	gH_SQL = Shavit_GetDatabase();
+	RefreshTrackNames();
+}
+
+void SQL_GetTrackInfo(int track)
+{
+	char gS_MySQLPrefix[64];
+	Shavit_GetSQLPrefix(gS_MySQLPrefix, sizeof(gS_MySQLPrefix));
+
+	char currentMap[64];
+	GetCurrentMap(currentMap, sizeof(currentMap));
+	
+	char sQuery[512];
+	FormatEx(sQuery, sizeof(sQuery), "SELECT track_name " 
+								  ..."FROM %smapzones "
+								  ..."WHERE (map=\"%s\" AND track=\"%i\");",
+									 gS_MySQLPrefix, currentMap, track);
+
+	SQL_TQuery(gH_SQL, SQL_GetTrackInfo_Callback, sQuery, track);
+}
+
+public void SQL_GetTrackInfo_Callback(Database db, DBResultSet results, const char[] error, any track)
+{
+	if (results == null)
+	{
+		LogError("[SQL_GetTrackInfo_Callback] Unable to get track info from database (Reason: %s)", error);
+		return;
+	}
+
+	while (SQL_FetchRow(results))
+	{
+		char sResult[64];
+		SQL_FetchString(results, 0, sResult, sizeof(sResult));
+		if (!StrEqual(sResult, "HANDLED_BY_PLUGIN"))
+		{
+			currentTrackInfo[track].bTrackHasCustomName = true;
+			Format(currentTrackInfo[track].trackName, sizeof(currentTrackInfo.trackName), "%s", sResult);
+		}
+	}
+}
+
+void RefreshTrackNames()
+{
+	Shavit_RefreshTracks();
+	for (int i; i < TRACKS_SIZE; i++)
+	{
+		if (!Shavit_IsStageValid(i))
+			continue;
+		
+		SQL_GetTrackInfo(i);
+	}
+}
+
+public void Shavit_OnTrackNameUpdated(int track, char[] old_name, int old_size, char[] new_name, int new_size)
+{
+	Shavit_RefreshTracks();
+	SQL_GetTrackInfo(track);
+}
+
+public void OnMapStart()
+{
+	// RefreshTrackNames();
+}
+
+public void OnClientDisconnect(int client)
+{
+	if (IsValidClient(client))
+		if (gH_UpdateTimer[client] != INVALID_HANDLE)
+		{
+			KillTimer(gH_UpdateTimer[client]);
+			gH_UpdateTimer[client] = INVALID_HANDLE;
+		}
+}
+
 public void Shavit_OnEnterZone(int client, int type, int track, int id, int entity)
 {
+	//RefreshTrackNames();
+	
 	if(type == Zone_CustomSpeedLimit)
 	{
 		gI_ZoneSpeedLimit[client] = Shavit_GetZoneData(id);
@@ -1325,7 +1431,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 			char sTrack[32];
 			if(data.iReplayStage == 0)
 			{
-				GetTrackName(client, data.iTrack, sTrack, 32);				
+				GetTrackName(client, data.iTrack, currentTrackInfo[data.iTrack], sTrack, 32);				
 			}
 			else
 			{
@@ -1358,10 +1464,14 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 					FormatEx(sLine, 128, "%T", "HudStage", client, data.iCurrentStage == 0 ? 1:data.iCurrentStage, data.iStageCount);
 					AddHUDLine(buffer, maxlen, sLine, iLines);
 				}
-				else if(data.iTrack == Track_Main)
+				else if(data.iTrack == 0)
 				{
 					FormatEx(sLine, 128, "Linear Map");
 					AddHUDLine(buffer, maxlen, sLine, iLines);
+				}
+				else
+				{
+					FormatEx(sLine, 128, "%T", client, sTrack);
 				}
 			}
 
@@ -1393,16 +1503,23 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 
 			if(data.iZoneHUD == ZoneHUD_Start)
 			{
-				GetTrackName(client, data.iTrack, sTrack, 32);
+				GetTrackName(client, data.iTrack, currentTrackInfo[data.iTrack], sTrack, 32);
 				FormatEx(sLine, 128, "%T\n", "HudInStartZone", client, sTrack);
 			}
 			else if (data.iZoneHUD == ZoneHUD_StageStart)
 			{
 				FormatEx(sLine, 128, "%T\n", "HudInStageStart", client, data.iZoneStage);
 			}
+			else if (data.iZoneStage == Zone_Stop)
+			{
+				char sMap[64];
+				GetCurrentMap(sMap, sizeof(sMap));
+
+				FormatEx(sLine, 128, "%T\n", "HudInJail", client, sMap);
+			}
 			else
 			{
-				GetTrackName(client, data.iTrack, sTrack, 32);
+				GetTrackName(client, data.iTrack, currentTrackInfo[data.iTrack], sTrack, 32);
 				FormatEx(sLine, 128, "%T\n", "HudInEndZone", client, sTrack);
 			}
 
@@ -1426,7 +1543,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 
 				if((gI_HUD2Settings[client] & HUD2_RANK) == 0)
 				{
-					FormatEx(sLine, 128, "%s%s (#%d)", sTime, sTimeDiff, data.iRank);
+					FormatEx(sLine, 128, "%s%s", sTime, sTimeDiff);
 				}
 				else
 				{
@@ -1439,7 +1556,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 
 			if((gI_HUD2Settings[client] & HUD2_TRACK) == 0)
 			{
-				GetTrackName(client, data.iTrack, sTrack, 32);
+				GetTrackName(client, data.iTrack, currentTrackInfo[data.iTrack], sTrack, 32);
 				if(data.iStageCount > 1)
 				{
 					if(Shavit_IsOnlyStageMode(client))
@@ -1475,7 +1592,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 				}
 				else
 				{
-					if(data.iTrack == Track_Main)
+					if(data.iTrack == 0)
 					{
 						FormatEx(sLine, 128, "%T", "HudLinearMap", client);
 					}
@@ -1489,30 +1606,30 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 				AddHUDLine(buffer, maxlen, " ", iLines);
 			}
 
-			if((gI_HUD2Settings[client] & HUD2_JUMPS) == 0)
-			{
-				FormatEx(sLine, 128, "%T: %d", "HudJumpsText", client, data.iJumps);
-				AddHUDLine(buffer, maxlen, sLine, iLines);
-			}
+			// if((gI_HUD2Settings[client] & HUD2_JUMPS) == 0)
+			// {
+			// 	FormatEx(sLine, 128, "%T: %d", "HudJumpsText", client, data.iJumps);
+			// 	AddHUDLine(buffer, maxlen, sLine, iLines);
+			// }
 
-			if((gI_HUD2Settings[client] & HUD2_STRAFE) == 0)
-			{
-				if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
-				{
-					FormatEx(sLine, 128, "%T: %d (%.1f％)", "HudStrafeText", client, data.iStrafes, data.fSync);
-				}
-				else
-				{
-					FormatEx(sLine, 128, "%T: %d", "HudStrafeText", client, data.iStrafes);
-				}
+			// if((gI_HUD2Settings[client] & HUD2_STRAFE) == 0)
+			// {
+			// 	if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
+			// 	{
+			// 		FormatEx(sLine, 128, "%T: %d (%.1f％)", "HudStrafeText", client, data.iStrafes, data.fSync);
+			// 	}
+			// 	else
+			// 	{
+			// 		FormatEx(sLine, 128, "%T: %d", "HudStrafeText", client, data.iStrafes);
+			// 	}
 
-				AddHUDLine(buffer, maxlen, sLine, iLines);
-			}
-			else if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
-			{
-				FormatEx(sLine, 128, "%T: %.1f％", "HudSync", client, data.fSync);
-				AddHUDLine(buffer, maxlen, sLine, iLines);
-			}
+			// 	AddHUDLine(buffer, maxlen, sLine, iLines);
+			// }
+			// else if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
+			// {
+			// 	FormatEx(sLine, 128, "%T: %.1f％", "HudSync", client, data.fSync);
+			// 	AddHUDLine(buffer, maxlen, sLine, iLines);
+			// }
 		}
 		else
 		{
@@ -1520,8 +1637,8 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 			{
 				if (Shavit_ZoneExists(Zone_Start, data.iTrack))
 				{
-					GetTrackName(client, data.iTrack, sTrack, 32);
-					FormatEx(sLine, 128, "%T%s", "HudTimerStoppedText", client, sTrack, (gI_HUD2Settings[client] & HUD2_SPEED) == 0 ? "\n":"");
+					GetTrackName(client, data.iTrack, currentTrackInfo[data.iTrack], sTrack, 32);
+					FormatEx(sLine, 128, "%T", "HudTimerStoppedText", client);
 					AddHUDLine(buffer, maxlen, sLine, iLines);
 				}
 				else
@@ -1532,27 +1649,27 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 			}
 		}
 
-		if((gI_HUD2Settings[client] & HUD2_SPEED) == 0)
-		{
-			if(data.iTimerStatus != Timer_Stopped && data.iZoneHUD == ZoneHUD_None)
-			{
-				if (data.fClosestReplayTime != -1.0 && (gI_HUD2Settings[client] & HUD2_VELOCITYDIFFERENCE) == 0)
-				{
-					float res = data.fClosestVelocityDifference;
-					FormatEx(sLine, 128, "%T: %d (%s%.0f)", "HudSpeedText", client, data.iSpeed, (res >= 0.0) ? "+":"", res);
-				}
-				else
-				{
-					FormatEx(sLine, 128, "%T: %d", "HudSpeedText", client, data.iSpeed);
-				}
-			}
-			else
-			{
-				FormatEx(sLine, 128, "%T: %d", "HudSpeedText", client, data.iSpeed);
-			}
+		// if((gI_HUD2Settings[client] & HUD2_SPEED) == 0)
+		// {
+		// 	if(data.iTimerStatus != Timer_Stopped && data.iZoneHUD == ZoneHUD_None)
+		// 	{
+		// 		if (data.fClosestReplayTime != -1.0 && (gI_HUD2Settings[client] & HUD2_VELOCITYDIFFERENCE) == 0)
+		// 		{
+		// 			float res = data.fClosestVelocityDifference;
+		// 			FormatEx(sLine, 128, "%T: %d (%s%.0f)", "HudSpeedText", client, data.iSpeed, (res >= 0.0) ? "+":"", res);
+		// 		}
+		// 		else
+		// 		{
+		// 			FormatEx(sLine, 128, "%T: %d", "HudSpeedText", client, data.iSpeed);
+		// 		}
+		// 	}
+		// 	else
+		// 	{
+		// 		FormatEx(sLine, 128, "%T: %d", "HudSpeedText", client, data.iSpeed);
+		// 	}
 
-			AddHUDLine(buffer, maxlen, sLine, iLines);
-		}
+		// 	AddHUDLine(buffer, maxlen, sLine, iLines);
+		// }
 
 		return iLines;
 	}
@@ -1595,7 +1712,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 // 		}
 // 	}
 
-// 	return iLines;
+	// return iLines;
 }
 
 int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
@@ -1637,7 +1754,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 
 			if(data.iTrack != Track_Main && (gI_HUD2Settings[client] & HUD2_TRACK) == 0)
 			{
-				GetTrackName(client, data.iTrack, sTrack, 32);
+				GetTrackName(client, data.iTrack, currentTrackInfo[data.iTrack], sTrack, 32);
 				Format(sTrack, 32, "(%s) ", sTrack);
 			}
 
@@ -1686,7 +1803,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 	{
 		if ((gI_HUD2Settings[client] & HUD2_TRACK) == 0)
 		{
-			GetTrackName(client, data.iTrack, sFirstThing, sizeof(sFirstThing));
+			GetTrackName(client, data.iTrack, currentTrackInfo[data.iTrack], sFirstThing, sizeof(sFirstThing));
 		}
 	}
 
@@ -1732,7 +1849,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 		{
 			int iColor = 0xFF0000; // red, worse than both pb and wr
 
-			if (false && data.iTimerStatus == Timer_Paused)
+			if (data.iTimerStatus == Timer_Paused)
 			{
 				iColor = 0xA9C5E8; // blue sky
 			}
@@ -2452,10 +2569,26 @@ void UpdateKeyHint(int client, bool force = false)
 
 	if((gI_HUDSettings[client] & HUD_OBSERVE) > 0)
 	{
-		if((gI_HUDSettings[client] & HUD_TIMELEFT) > 0 && GetMapTimeLeft(iTimeLeft) && iTimeLeft > 0)
+		if((gI_HUDSettings[client] & HUD_3DVEL) == 0)
 		{
-			FormatEx(sMessage, 256, (iTimeLeft > 60)? "%T: %d minutes":"%T: %d seconds", "HudTimeLeft", client, (iTimeLeft > 60) ? (iTimeLeft / 60)+1 : iTimeLeft);
+			// Thanks to TheTwistedPanda for this code:
+			float fTemp[3];
+			float fVelocity;
+			//get proper vector and calculate velocity
+			GetEntPropVector(target, Prop_Data, "m_vecVelocity", fTemp);
+			for(int i = 0; i <= 2; i++)
+			{
+				fTemp[i] *= fTemp[i];
+			}
+			fVelocity = SquareRoot(fTemp[0] + fTemp[1] + fTemp[2]);
+
+			FormatEx(sMessage, 256, "%T", "HudSpeedo", client, fVelocity);
 		}
+
+		// if((gI_HUDSettings[client] & HUD_TIMELEFT) > 0 && GetMapTimeLeft(iTimeLeft) && iTimeLeft > 0)
+		// {
+		// 	FormatEx(sMessage, 256, (iTimeLeft > 60)? "%T: %d minutes":"%T: %d seconds", "HudTimeLeft", client, (iTimeLeft > 60) ? (iTimeLeft / 60)+1 : iTimeLeft);
+		// }
 
 		if ((0 <= style < gI_Styles) && (0 <= track <= TRACKS_SIZE))
 		{
@@ -2469,7 +2602,7 @@ void UpdateKeyHint(int client, bool force = false)
 			if((gI_HUD2Settings[client] & HUD2_STYLE) == 0)
 			{
 				sStyle = gS_StyleStrings[style].sStyleName;
-				Format(sMessage, 256, "%s%s%T: %s", sMessage, (strlen(sMessage) > 0)? "\n\n":"", "HudStyle", client, sStyle);
+				//Format(sMessage, 256, "%s%s%T: %s", sMessage, (strlen(sMessage) > 0)? "\n\n":"", "HudStyle", client, sStyle);
 			}
 
 			if ((gI_HUDSettings[client] & HUD_WRPB) > 0 && !bOnlyStageMode)
@@ -2487,11 +2620,11 @@ void UpdateKeyHint(int client, bool force = false)
 						char sSHWRName[32];
 						Shavit_GetSHMapRecordName(track, sSHWRName, 32);
 
-						Format(sMessage, sizeof(sMessage), "%s%sSH: %s (%s)", sMessage, (strlen(sMessage) > 0)? "\n\n":"", sSHWRTime, sSHWRName);
+						//Format(sMessage, sizeof(sMessage), "%s%sSH: %s (%s)", sMessage, (strlen(sMessage) > 0)? "\n\n":"", sSHWRTime, sSHWRName);
 					}
 					else if(fSHWRTime == -1.0)
 					{
-						Format(sMessage, sizeof(sMessage), "%s%sSH: Loading...", sMessage, (strlen(sMessage) > 0)? "\n\n":"");
+						//Format(sMessage, sizeof(sMessage), "%s%sSH: Loading...", sMessage, (strlen(sMessage) > 0)? "\n\n":"");
 					}
 
 					if (fWRTime != 0.0)
@@ -2502,7 +2635,7 @@ void UpdateKeyHint(int client, bool force = false)
 						char sWRName[MAX_NAME_LENGTH];
 						Shavit_GetWRName(style, sWRName, MAX_NAME_LENGTH, track);
 
-						Format(sMessage, sizeof(sMessage), "%s%sSR: %s (%s)", sMessage, ((strlen(sMessage) > 0) && fSHWRTime == 0.0)? "\n\n":"\n", sWRTime, sWRName);
+						Format(sMessage, sizeof(sMessage), "%s%sWR: %s (%s)", sMessage, ((strlen(sMessage) > 0) && fSHWRTime == 0.0)? "\n\n":"\n", sWRTime, sWRName);
 					}
 				}
 				else
@@ -2516,7 +2649,7 @@ void UpdateKeyHint(int client, bool force = false)
 						char sWRName[MAX_NAME_LENGTH];
 						Shavit_GetWRName(style, sWRName, MAX_NAME_LENGTH, track);
 
-						Format(sMessage, sizeof(sMessage), "%s%sSR: %s (%s)", sMessage, (strlen(sMessage) > 0)? "\n\n":"", sWRTime, sWRName);
+						Format(sMessage, sizeof(sMessage), "%s%sWR: %s (%s)", sMessage, (strlen(sMessage) > 0)? "\n\n":"", sWRTime, sWRName);
 					}
 				}
 
@@ -2535,17 +2668,17 @@ void UpdateKeyHint(int client, bool force = false)
 					{
 						if(fTargetPB != 0.0)
 						{
-							Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sTargetPB, Shavit_GetRankForTime(style, fTargetPB, track), target);
+							//Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sTargetPB, Shavit_GetRankForTime(style, fTargetPB, track), target);
 						}
 
 						if(fSelfPB != 0.0)
 						{
-							Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track), client);
+							//Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track), client);
 						}
 					}
 					else if(fSelfPB != 0.0)
 					{
-						Format(sMessage, sizeof(sMessage), "%s\n%s (#%d)", sMessage, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track));
+						//Format(sMessage, sizeof(sMessage), "%s\n%s (#%d)", sMessage, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track));
 					}
 				}
 			}
@@ -2559,7 +2692,7 @@ void UpdateKeyHint(int client, bool force = false)
 					float fSHStageWRTime = Shavit_GetSHStageRecordTime(stage);
 					if(fSHStageWRTime > 0.0)
 					{
-						Format(sMessage, sizeof(sMessage), "%s%s- %T %d -", sMessage, (strlen(sMessage) > 0)? "\n\n":"", "HudStageText", client, stage);
+						//Format(sMessage, sizeof(sMessage), "%s%s- %T %d -", sMessage, (strlen(sMessage) > 0)? "\n\n":"", "HudStageText", client, stage);
 						
 						char sSHStageWRTime[16];
 						FormatSeconds(fSHStageWRTime, sSHStageWRTime, 16);
@@ -2567,12 +2700,12 @@ void UpdateKeyHint(int client, bool force = false)
 						char sSHStageWRName[32];
 						Shavit_GetSHStageRecordName(stage, sSHStageWRName, 32);
 
-						Format(sMessage, sizeof(sMessage), "%s\nSH: %s (%s)", sMessage, sSHStageWRTime, sSHStageWRName);
+						//Format(sMessage, sizeof(sMessage), "%s\nSH: %s (%s)", sMessage, sSHStageWRTime, sSHStageWRName);
 					}
 					else if(fSHStageWRTime == -1.0)
 					{
-						Format(sMessage, sizeof(sMessage), "%s%s- %T %d -", sMessage, (strlen(sMessage) > 0)? "\n\n":"", "HudStageText", client, stage);
-						Format(sMessage, sizeof(sMessage), "%s\nSH: Loading...", sMessage);
+						//Format(sMessage, sizeof(sMessage), "%s%s- %T %d -", sMessage, (strlen(sMessage) > 0)? "\n\n":"", "HudStageText", client, stage);
+						//Format(sMessage, sizeof(sMessage), "%s\nSH: Loading...", sMessage);
 					}
 
 					if (fStageWR != 0.0)
@@ -2588,7 +2721,7 @@ void UpdateKeyHint(int client, bool force = false)
 						char sStageWR[16];
 						FormatSeconds(fStageWR, sStageWR, sizeof(sStageWR));
 
-						Format(sMessage, sizeof(sMessage), "%s\nSR: %s (%s)", sMessage, sStageWR, sStageWRName);
+						Format(sMessage, sizeof(sMessage), "%s\nWR: %s (%s)", sMessage, sStageWR, sStageWRName);
 					}	
 				}
 				else
@@ -2603,7 +2736,7 @@ void UpdateKeyHint(int client, bool force = false)
 						char sStageWR[16];
 						FormatSeconds(fStageWR, sStageWR, sizeof(sStageWR));
 
-						Format(sMessage, sizeof(sMessage), "%s\nSR: %s (%s)", sMessage, sStageWR, sStageWRName);
+						Format(sMessage, sizeof(sMessage), "%s\nWR: %s (%s)", sMessage, sStageWR, sStageWRName);
 					}					
 				}
 
@@ -2623,17 +2756,17 @@ void UpdateKeyHint(int client, bool force = false)
 					{
 						if(fTargetStagePB != 0.0)
 						{
-							Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sTargetStagePB, Shavit_GetStageRankForTime(style, fTargetStagePB, stage), target);
+							//Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sTargetStagePB, Shavit_GetStageRankForTime(style, fTargetStagePB, stage), target);
 						}
 
 						if(fSelfStagePB != 0.0)
 						{
-							Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sSelfStagePB, Shavit_GetStageRankForTime(style, fSelfStagePB, stage), client);
+							//Format(sMessage, sizeof(sMessage), "%s\n%s (#%d) (%N)", sMessage, sSelfStagePB, Shavit_GetStageRankForTime(style, fSelfStagePB, stage), client);
 						}
 					}
 					else if(fSelfStagePB != 0.0)
 					{
-						Format(sMessage, sizeof(sMessage), "%s\n%s (#%d)", sMessage, sSelfStagePB, Shavit_GetStageRankForTime(style, fSelfStagePB, stage));
+						//Format(sMessage, sizeof(sMessage), "%s\n%s (#%d)", sMessage, sSelfStagePB, Shavit_GetStageRankForTime(style, fSelfStagePB, stage));
 					}
 				}
 			}

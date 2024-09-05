@@ -137,7 +137,7 @@ public void SQL_CreateTables(Database hSQL, const char[] prefix, int driver)
 
 	Transaction trans = new Transaction();
 
-	char sQuery[2048];
+	char sQuery[4096];
 	char sOptionalINNODB[16];
 
 	if (driver == Driver_mysql)
@@ -213,14 +213,14 @@ public void SQL_CreateTables(Database hSQL, const char[] prefix, int driver)
 	if (driver == Driver_mysql)
 	{
 		FormatEx(sQuery, sizeof(sQuery),
-			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INT NOT NULL AUTO_INCREMENT, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, PRIMARY KEY (`id`), INDEX `map` (`map`, `style`, `track`, `time`), INDEX `auth` (`auth`, `date`, `points`), INDEX `time` (`time`), INDEX `map2` (`map`), CONSTRAINT `%spt_auth` FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`) ON UPDATE RESTRICT ON DELETE RESTRICT) ENGINE=INNODB;",
+			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INT NOT NULL AUTO_INCREMENT, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, PRIMARY KEY (`id`), INDEX `map` (`map`, `style`, `track`, `time`), INDEX `auth` (`auth`, `date`, `points`), INDEX `time` (`time`), INDEX `map2` (`map`), FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`)) ENGINE=INNODB;",
 			gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix);
 	}
 	else
 	{
 		// id  style  track  time  auth  map  points  exact_time_int
 		FormatEx(sQuery, sizeof(sQuery),
-			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INTEGER PRIMARY KEY, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, CONSTRAINT `%spt_auth` FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`) ON UPDATE RESTRICT ON DELETE RESTRICT);",
+			"CREATE TABLE IF NOT EXISTS `%splayertimes` (`id` INTEGER PRIMARY KEY, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `time`);",
 			gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix);
 		strcopy(SQLitePTQuery, sizeof(SQLitePTQuery), sQuery);
 	}
@@ -234,13 +234,13 @@ public void SQL_CreateTables(Database hSQL, const char[] prefix, int driver)
 	if (driver == Driver_mysql)
 	{
 		FormatEx(sQuery, sizeof(sQuery),																														///////////////////////////////////////
-			"CREATE TABLE IF NOT EXISTS `%sstagetimes` (`id` INT NOT NULL AUTO_INCREMENT, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `stage` TINYINT NOT NULL DEFAULT 0,`time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, PRIMARY KEY (`id`), INDEX `map` (`map`, `style`, `track`, `time`), INDEX `auth` (`auth`, `date`, `points`), INDEX `time` (`time`), INDEX `map2` (`map`), CONSTRAINT `%spt_auth` FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`) ON UPDATE RESTRICT ON DELETE RESTRICT) ENGINE=INNODB;",
+			"CREATE TABLE IF NOT EXISTS `%sstagetimes` (`id` INT NOT NULL AUTO_INCREMENT, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `stage` TINYINT NOT NULL DEFAULT 0,`time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, PRIMARY KEY (`id`), INDEX `map` (`map`, `style`, `track`, `time`), INDEX `auth` (`auth`, `date`, `points`), INDEX `time` (`time`), INDEX `map2` (`map`), FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`)) ENGINE=INNODB;",
 			gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix);
 	}
 	else
 	{
 		FormatEx(sQuery, sizeof(sQuery),																												 ////////////////////////////////////
-			"CREATE TABLE IF NOT EXISTS `%sstagetimes` (`id` INTEGER PRIMARY KEY, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `stage` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, CONSTRAINT `%spt_auth` FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`) ON UPDATE RESTRICT ON DELETE RESTRICT);",
+			"CREATE TABLE IF NOT EXISTS `%sstagetimes` (`id` INTEGER PRIMARY KEY, `style` TINYINT NOT NULL DEFAULT 0, `track` TINYINT NOT NULL DEFAULT 0, `stage` TINYINT NOT NULL DEFAULT 0, `time` FLOAT NOT NULL, `auth` INT NOT NULL, `map` VARCHAR(255) NOT NULL, `points` FLOAT NOT NULL DEFAULT 0, `jumps` INT, `date` INT, `strafes` INT, `sync` FLOAT, `perfs` FLOAT DEFAULT 0, `completions` SMALLINT DEFAULT 1, FOREIGN KEY (`auth`) REFERENCES `%susers` (`auth`));",
 			gS_SQLPrefix, gS_SQLPrefix, gS_SQLPrefix);
 		strcopy(SQLitePTQuery, sizeof(SQLitePTQuery), sQuery);
 	}
@@ -303,14 +303,14 @@ public void SQL_CreateTables(Database hSQL, const char[] prefix, int driver)
 	if (driver == Driver_mysql)
 	{
 		FormatEx(sQuery, sizeof(sQuery),
-			"CREATE TABLE IF NOT EXISTS `%smapzones` (`id` INT AUTO_INCREMENT, `map` VARCHAR(255) NOT NULL, `type` INT, `corner1_x` FLOAT, `corner1_y` FLOAT, `corner1_z` FLOAT, `corner2_x` FLOAT, `corner2_y` FLOAT, `corner2_z` FLOAT, `destination_x` FLOAT NOT NULL DEFAULT 0, `destination_y` FLOAT NOT NULL DEFAULT 0, `destination_z` FLOAT NOT NULL DEFAULT 0, `track` INT NOT NULL DEFAULT 0, `flags` INT NOT NULL DEFAULT 0, `data` INT NOT NULL DEFAULT 0, `speedlimit` TINYINT NOT NULL DEFAULT 1, `form` TINYINT, `target` VARCHAR(63), PRIMARY KEY (`id`)) %s;",
+			"CREATE TABLE IF NOT EXISTS `%smapzones` (`id` INT AUTO_INCREMENT, `map` VARCHAR(255) NOT NULL, `track_name` VARCHAR(32) NOT NULL DEFAULT \"HANDLED_BY_PLUGIN\", `type` INT, `corner1_x` FLOAT, `corner1_y` FLOAT, `corner1_z` FLOAT, `corner2_x` FLOAT, `corner2_y` FLOAT, `corner2_z` FLOAT, `destination_x` FLOAT NOT NULL DEFAULT 0, `destination_y` FLOAT NOT NULL DEFAULT 0, `destination_z` FLOAT NOT NULL DEFAULT 0, `track` INT NOT NULL DEFAULT 0, `flags` INT NOT NULL DEFAULT 0, `data` INT NOT NULL DEFAULT 0, `speedlimit` TINYINT NOT NULL DEFAULT 1, `form` TINYINT, `target` VARCHAR(63), PRIMARY KEY (`id`)) %s;",
 			gS_SQLPrefix, sOptionalINNODB);
 		AddQueryLog(trans, sQuery);
 	}
 	else
 	{
 		FormatEx(sQuery, sizeof(sQuery),
-			"CREATE TABLE IF NOT EXISTS `%smapzones` (`id` INTEGER PRIMARY KEY, `map` VARCHAR(255) NOT NULL, `type` INT, `corner1_x` FLOAT, `corner1_y` FLOAT, `corner1_z` FLOAT, `corner2_x` FLOAT, `corner2_y` FLOAT, `corner2_z` FLOAT, `destination_x` FLOAT NOT NULL DEFAULT 0, `destination_y` FLOAT NOT NULL DEFAULT 0, `destination_z` FLOAT NOT NULL DEFAULT 0, `track` INT NOT NULL DEFAULT 0, `flags` INT NOT NULL DEFAULT 0, `data` INT NOT NULL DEFAULT 0, `speedlimit` TINYINT NOT NULL DEFAULT 1, `form` TINYINT, `target` VARCHAR(63));",
+			"CREATE TABLE IF NOT EXISTS `%smapzones` (`id` INTEGER PRIMARY KEY, `map` VARCHAR(255) NOT NULL, `track_name` VARCHAR(32) NOT NULL DEFAULT \"HANDLED_BY_PLUGIN\", `type` INT, `corner1_x` FLOAT, `corner1_y` FLOAT, `corner1_z` FLOAT, `corner2_x` FLOAT, `corner2_y` FLOAT, `corner2_z` FLOAT, `destination_x` FLOAT NOT NULL DEFAULT 0, `destination_y` FLOAT NOT NULL DEFAULT 0, `destination_z` FLOAT NOT NULL DEFAULT 0, `track` INT NOT NULL DEFAULT 0, `flags` INT NOT NULL DEFAULT 0, `data` INT NOT NULL DEFAULT 0, `speedlimit` TINYINT NOT NULL DEFAULT 1, `form` TINYINT, `target` VARCHAR(63));",
 			gS_SQLPrefix);
 		AddQueryLog(trans, sQuery);
 		strcopy(SQLiteMapzonesQuery, sizeof(SQLiteMapzonesQuery), sQuery);

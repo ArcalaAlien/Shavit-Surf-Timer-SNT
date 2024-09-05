@@ -24,6 +24,13 @@
 #endif
 #define _shavit_wr_included
 
+enum struct payout_info
+{
+	int iWorldRecord;
+	int iNewPersonalBest;
+	int iRegularFinish;
+}
+
 /**
  * Like Shavit_OnFinishStage, but after the insertion query was called.
  * Called from shavit-wr

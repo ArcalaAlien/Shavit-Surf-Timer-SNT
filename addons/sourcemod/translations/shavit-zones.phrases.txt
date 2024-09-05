@@ -211,8 +211,8 @@
 	}
 	"ZoneCreateType"
 	{
-		"#format"	"{1:s}{2:s}{3:s}"
-		"en"		"Creating zone: {1}{2}{3}."
+		"#format"	"{1:s}{2:s}{3:s}{4:s}{5:s}"
+		"en"		"Creating {1}{2}{3} on {4}{5}"
 	}
 	"ZoneCustomSpawnSuccess"
 	{
@@ -532,7 +532,17 @@
 	"ZoneStopEnter"
 	{
 		"#format"	"{1:s},{2:s},{3:s}"
-		"en"		"{1}Your timer has been stopped for entering a {2}glitch zone{3}."
+		"en"		"{1}Your timer has been stopped for entering {2}jail{3}."
+	}
+	"ZoneCheaterEnter"
+	{
+		"#format"	"{1:s}"
+		"en"		"{1}No cheating!"
+	}
+	"ZoneSecretEnter"
+	{
+		"#format"	"{1:s},{2:s},{3:s},{4:s},{5:s}"
+		"en"		"{1}}Congratulations! {2}You found a {3}secret{4}! {5}Your timer has been stopped."
 	}
 	"ZoneStageEnter"
 	{
@@ -541,19 +551,23 @@
 	}
 	"Zone_Start"
 	{
-		"en"		"Start zone"
+		"en"		"Start Zone"
 	}
 	"Zone_End"
 	{
-		"en"		"End zone"
+		"en"		"End Zone"
 	}
-	"Zone_Respawn"
+	"Zone_Secret"
 	{
-		"en"		"Glitch Zone (Respawn Player)"
+		"en"		"Secret Zone (Stops Timer)"
+	}
+	"Zone_Cheater"
+	{
+		"en"		"No Cheating Zone"
 	}
 	"Zone_Stop"
 	{
-		"en"		"Glitch Zone (Stop Timer)"
+		"en"		"Jail Zone"
 	}
 	"Zone_Slay"
 	{
@@ -573,7 +587,7 @@
 	}
 	"Zone_CustomSpawn"
 	{
-		"en"		"SPAWN POINT"
+		"en"		"Spawn Point"
 	}
 	"Zone_Easybhop"
 	{
@@ -585,7 +599,7 @@
 	}
 	"Zone_Airaccelerate"
 	{
-		"en"		"Custom Airaccelerate"
+		"en"		"Custom sv_airaccelerate"
 	}
 	"Zone_Stage"
 	{
@@ -593,11 +607,11 @@
 	}
 	"Zone_Checkpoint"
 	{
-		"en"		"Checkpont Zone"
+		"en"		"Checkpoint Zone"
 	}
 	"Zone_NoTimerGravity"
 	{
-		"en"		"No Timer Gravity Zone"
+		"en"		"Gravity Zone (No Timer)"
 	}
 	"Zone_Gravity"
 	{

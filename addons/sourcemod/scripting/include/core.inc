@@ -135,6 +135,8 @@ enum struct timer_snapshot_t
 	float fServerTime;
 	int iKeyCombo;
 	int iTimerTrack;
+	int iHighestTrack;
+	int iHighestBonus;
 	int iLastStage;
 	int iMeasuredJumps;
 	int iPerfectJumps;
@@ -1079,6 +1081,22 @@ native float Shavit_GetClientStageTime(int client);
  * @return                          Timer track.
  */
 native int Shavit_GetClientTrack(int client);
+
+/**
+ *  Retrieve the client's highest track they reached.
+ * 
+ * @param client					Client index
+ * @return							Highest track reached.
+ */
+native int Shavit_GetClientHighestTrack(int client);
+
+/**
+ *  Retrieve the client's highest bonus they reached.
+ * 
+ *  @param client					Client index
+ *  @return							Highest bonus track
+ */
+native int Shavit_GetClientHighestBonus(int client);
 
 /**
  * Retrieve the client's current stage number.

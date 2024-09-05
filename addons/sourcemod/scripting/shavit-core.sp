@@ -188,6 +188,8 @@ int gI_LastPrintedSteamID[MAXPLAYERS+1];
 // kz support
 bool gB_KZMap[TRACKS_SIZE];
 
+// Track stuff
+track_info currentTrackInfo[TRACKS_SIZE];
 
 #include <shavit/bhopstats-timerified.sp> // down here to get includes from replay-playback & to inherit gB_ReplayPlayback
 
@@ -791,7 +793,7 @@ public Action Command_StartTimer(int client, int args)
 	if (!gB_Zones || !(Shavit_ZoneExists(Zone_Start, track) || gB_KZMap[track]))
 	{
 		char sTrack[32];
-		GetTrackName(client, track, sTrack, 32);
+		GetTrackName(client, track, currentTrackInfo[track], sTrack, 32);
 
 		Shavit_PrintToChat(client, "%T", "StartZoneUndefined", client, gS_ChatStrings.sWarning, gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTrack, gS_ChatStrings.sText);
 
@@ -1021,7 +1023,7 @@ public void CallOnRepeatChanged(int client, bool old_value, bool new_value)
 	char sTrack[32];
 	if(gA_Timers[client].iTimerTrack != Track_Main)
 	{
-		GetTrackName(client, gA_Timers[client].iTimerTrack, sTrack, 32);		
+		GetTrackName(client, gA_Timers[client].iTimerTrack, currentTrackInfo[gA_Timers[client].iTimerTrack], sTrack, 32);		
 	}
 	else
 	{
@@ -1632,12 +1634,12 @@ void CallOnTrackChanged(int client, int oldtrack, int newtrack)
 			char sTrack[32];
 			if(newtrack != Track_Main)
 			{
-				GetTrackName(client, newtrack, sTrack, 32);
+				GetTrackName(client, newtrack, currentTrackInfo[newtrack], sTrack, 32);
 				Shavit_PrintToChat(client, "%T", "EnabledTimerRepeat", client, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);				
 			}
 			else if(Shavit_GetStageCount(newtrack) < 2)
 			{
-				GetTrackName(client, oldtrack, sTrack, 32);
+				GetTrackName(client, oldtrack, currentTrackInfo[oldtrack], sTrack, 32);
 				ChangeClientRepeat(client, false);
 				Shavit_PrintToChat(client, "%T", "DisableTimerRepeat", client, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);	
 			}
