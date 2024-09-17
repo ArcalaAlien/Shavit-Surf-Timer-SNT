@@ -529,20 +529,25 @@
 		"#format"	"{1:s},{2:s},{3:s}"
 		"en"		"{1}You have been slain for entering a {2}glitch zone{3}."
 	}
-	"ZoneStopEnter"
+	"ZoneJailEnter"
 	{
-		"#format"	"{1:s},{2:s},{3:s}"
-		"en"		"{1}Your timer has been stopped for entering {2}jail{3}."
+		"#format"	"{1:s},{2:s}"
+		"en"		"{1}Your timer has been stopped for {2}entering jail."
 	}
 	"ZoneCheaterEnter"
 	{
 		"#format"	"{1:s}"
-		"en"		"{1}No cheating!"
+		"en"		"{1}Your timer has been stopped."
 	}
 	"ZoneSecretEnter"
 	{
 		"#format"	"{1:s},{2:s},{3:s},{4:s},{5:s}"
-		"en"		"{1}}Congratulations! {2}You found a {3}secret{4}! {5}Your timer has been stopped."
+		"en"		"{1}Congratulations! {2}You found a {3}secret{4}! {5}Your timer has been stopped."
+	}
+	"ZoneStopEnter"
+	{
+		"#format"	"{1:s}"
+		"en"		"{1}No Cheating!"
 	}
 	"ZoneStageEnter"
 	{
@@ -565,9 +570,13 @@
 	{
 		"en"		"No Cheating Zone"
 	}
-	"Zone_Stop"
+	"Zone_Jail"
 	{
 		"en"		"Jail Zone"
+	}
+	"Zone_Stop"
+	{
+		"en"		"Generic Stop Zone"
 	}
 	"Zone_Slay"
 	{

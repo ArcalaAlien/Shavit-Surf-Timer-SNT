@@ -26,6 +26,7 @@
 #include <clientprefs>
 #include <convar_class>
 #include <dhooks>
+#include <tf2_stocks>
 
 #define DEBUG 0
 
@@ -40,13 +41,15 @@
 #include <eventqueuefix>
 
 #include <shavit/chat-colors>
-#include <shavit/anti-sv_cheats.sp>
 #include <shavit/steamid-stocks>
 #include <shavit/style-settings.sp>
 #include <shavit/sql-create-tables-and-migrations.sp>
 #include <shavit/physicsuntouch>
 
 #include <adminmenu>
+
+#undef REQUIRE_EXTENSIONS
+#include <cstrike>
 
 #pragma newdecls required
 #pragma semicolon 1
@@ -93,6 +96,8 @@ Handle gH_Forwards_OnProcessMovement = null;
 Handle gH_Forwards_OnProcessMovementPost = null;
 Handle gH_Forwards_OnTimerMenuCreate = null;
 Handle gH_Forwards_OnTimerMenuSelected = null;
+Handle gH_Forwards_OnTrackNameUpdated = null;
+Handle gH_Forwards_SQL_NameRetrieved = null;
 
 // player timer variables
 timer_snapshot_t gA_Timers[MAXPLAYERS+1];
@@ -140,6 +145,7 @@ TopMenu gH_AdminMenu = null;
 TopMenuObject gH_TimerCommands = INVALID_TOPMENUOBJECT;
 
 // cvars
+ConVar gCV_Enabled = null;
 Convar gCV_Restart = null;
 Convar gCV_Pause = null;
 //Convar gCV_PauseMovement = null;
@@ -188,8 +194,9 @@ int gI_LastPrintedSteamID[MAXPLAYERS+1];
 // kz support
 bool gB_KZMap[TRACKS_SIZE];
 
-// Track stuff
+// track info
 track_info currentTrackInfo[TRACKS_SIZE];
+#define TRACK_NAME currentTrackInfo[track].trackName
 
 #include <shavit/bhopstats-timerified.sp> // down here to get includes from replay-playback & to inherit gB_ReplayPlayback
 
@@ -197,7 +204,7 @@ track_info currentTrackInfo[TRACKS_SIZE];
 public Plugin myinfo =
 {
 	name = "[shavit-surf] Core",
-	author = "shavit, rtldg, KiD Fearless, GAMMA CASE, Technoblazed, carnifex, ofirgall, Nairda, Extan, rumour, OliviaMourning, Nickelony, sh4hrazad, BoomShotKapow, strafe",
+	author = "shavit, rtldg, KiD Fearless, GAMMA CASE, Technoblazed, carnifex, ofirgall, Nairda, Extan, rumour, OliviaMourning, Nickelony, sh4hrazad, BoomShotKapow, strafe EDIT BY: Arcala the Gyiyg",
 	description = "The core for shavit surf timer. (This plugin is base on shavit's bhop timer)",
 	version = SHAVIT_SURF_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -221,6 +228,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_GetClientTime", Native_GetClientTime);
 	CreateNative("Shavit_GetClientStageTime", Native_GetClientStageTime);
 	CreateNative("Shavit_GetClientTrack", Native_GetClientTrack);
+	CreateNative("Shavit_GetClientHighestTrack", Native_GetClientHighestTrack);
+	CreateNative("Shavit_GetClientHighestBonus", Native_GetClientHighestBonus);
 	CreateNative("Shavit_GetClientLastStage", Native_GetClientLastStage);
 	CreateNative("Shavit_SetClientLastStage", Native_SetClientLastStage);
 	CreateNative("Shavit_GetClientCPTimes", Native_GetClientCPTimes);
@@ -267,6 +276,10 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_SetOnlyStageMode", Native_SetOnlyStageMode);
 	CreateNative("Shavit_IsClientRepeat", Native_IsClientRepeat);
 	CreateNative("Shavit_SetClientRepeat", Native_SetClientRepeat);
+	CreateNative("Shavit_GetTrackInfo", Native_GetTrackInfo);
+	CreateNative("Shavit_RefreshTracks", Native_RefreshTracks);
+	CreateNative("Shavit_GetSQLPrefix", Native_GetSQLPrefix);
+	CreateNative("Shavit_GetCustomTrackName", Native_GetCustomTrackName);
 
 	// registers library, check "bool LibraryExists(const char[] name)" in order to use with other plugins
 	RegPluginLibrary("shavit");
@@ -308,6 +321,8 @@ public void OnPluginStart()
 	gH_Forwards_OnProcessMovementPost = CreateGlobalForward("Shavit_OnProcessMovementPost", ET_Event, Param_Cell);
 	gH_Forwards_OnTimerMenuCreate = CreateGlobalForward("Shavit_OnTimerMenuMade", ET_Event, Param_Cell, Param_Cell);
 	gH_Forwards_OnTimerMenuSelected = CreateGlobalForward("Shavit_OnTimerMenuSelect", ET_Event, Param_Cell, Param_Cell, Param_String, Param_Cell);
+	gH_Forwards_OnTrackNameUpdated = CreateGlobalForward("Shavit_OnTrackNameUpdated", ET_Event, Param_Cell, Param_String, Param_Cell, Param_String, Param_Cell);
+	gH_Forwards_SQL_NameRetrieved = CreateGlobalForward("Shavit_OnTrackNameRetrievedSQL", ET_Event, Param_Cell, Param_String, Param_Cell, Param_CellByRef);
 
 	Bhopstats_CreateForwards();
 	Shavit_Style_Settings_Forwards();
@@ -332,7 +347,7 @@ public void OnPluginStart()
 	LoadDHooks();
 
 	// hooks
-	gB_HookedJump = HookEventEx("player_jump", Player_Jump);
+	// gB_HookedJump = HookEventEx("player_jump", Player_Jump);
 	HookEvent("player_death", Player_Death);
 	HookEvent("player_team", Player_Death);
 	HookEvent("player_spawn", Player_Death);
@@ -349,37 +364,54 @@ public void OnPluginStart()
 
 	// timer start
 	RegConsoleCmd("sm_start", Command_StartTimer, "Start your timer.");
-	RegConsoleCmd("sm_r", Command_StartTimer, "Start your timer.");
-	RegConsoleCmd("sm_restart", Command_StartTimer, "Start your timer.");
+	// RegConsoleCmd("sm_r", Command_StartTimer, "Start your timer.");
+	// RegConsoleCmd("sm_restart", Command_StartTimer, "Start your timer.");
 	RegConsoleCmd("sm_m", Command_StartTimer, "Start your timer on the main track.");
-	RegConsoleCmd("sm_main", Command_StartTimer, "Start your timer on the main track.");
+	// RegConsoleCmd("sm_main", Command_StartTimer, "Start your timer on the main track.");
 	RegConsoleCmd("sm_ihate!main", Command_IHateMain, "If you really hate !main :(((");
 	gH_IHateMain = new Cookie("shavit_mainhater", "If you really hate !main :(((", CookieAccess_Protected);
 
 	RegConsoleCmd("sm_b", Command_StartTimer, "Start your timer on the bonus track.");
-	RegConsoleCmd("sm_bonus", Command_StartTimer, "Start your timer on the bonus track.");
+	// RegConsoleCmd("sm_bonus", Command_StartTimer, "Start your timer on the bonus track.");
+
+	RegAdminCmd("sm_track", Command_EditTrack, ADMFLAG_BAN, "/track <id (0-40)> <name> Change the name of a track");
+
+	//moving spectate to core
+	RegConsoleCmd("sm_spec", Command_Spec, "Moves you to the spectators' team. Usage: sm_spec [target]");
+	RegConsoleCmd("sm_spectate", Command_Spec, "Moves you to the spectators' team. Usage: sm_spec [target]");
 
 	//change noclip speed
-	RegConsoleCmd("sm_noclipspeed", Command_NoclipSpeed, "Change client's sv_noclipspeed to specific value");
-	RegConsoleCmd("sm_ns", Command_NoclipSpeed, "Change client's sv_noclipspeed to specific value");	
+	// RegConsoleCmd("sm_noclipspeed", Command_NoclipSpeed, "Change client's sv_noclipspeed to specific value");
+	// RegConsoleCmd("sm_ns", Command_NoclipSpeed, "Change client's sv_noclipspeed to specific value");	
 
 	//repeat command
 	RegConsoleCmd("sm_repeat", Command_ToggleRepeat, "Repeat client's timer to a stage or a bonus.");
 
 
+	char mapName[64];
+	GetCurrentMap(mapName, sizeof(mapName));
+
+	for (int i = Track_Main; i <= Track_Stage_Last; i++)
+	{
+		char cmd[10], helptext[50];
+		FormatEx(cmd, sizeof(cmd), "sm_m%d", i);
+		FormatEx(helptext, sizeof(helptext), "Start your timer on %s Stage: %d", mapName, i);
+		RegConsoleCmd(cmd, Command_StartTimer, helptext);
+	}
+
 	for (int i = Track_Bonus; i <= Track_Bonus_Last; i++)
 	{
 		char cmd[10], helptext[50];
 		FormatEx(cmd, sizeof(cmd), "sm_b%d", i);
-		FormatEx(helptext, sizeof(helptext), "Start your timer on the bonus %d track.", i);
+		FormatEx(helptext, sizeof(helptext), "Start your timer on %s Bonus: %d", mapName, i);
 		RegConsoleCmd(cmd, Command_StartTimer, helptext);
 	}
 
 	// teleport to end
-	RegConsoleCmd("sm_end", Command_TeleportEnd, "Teleport to endzone.");
+	// RegConsoleCmd("sm_end", Command_TeleportEnd, "Teleport to endzone.");
 
-	RegConsoleCmd("sm_bend", Command_TeleportEnd, "Teleport to endzone of the bonus track.");
-	RegConsoleCmd("sm_bonusend", Command_TeleportEnd, "Teleport to endzone of the bonus track.");
+	// RegConsoleCmd("sm_bend", Command_TeleportEnd, "Teleport to endzone of the bonus track.");
+	// RegConsoleCmd("sm_bonusend", Command_TeleportEnd, "Teleport to endzone of the bonus track.");
 
 	// timer stop
 	RegConsoleCmd("sm_stop", Command_StopTimer, "Stop your timer.");
@@ -395,12 +427,12 @@ public void OnPluginStart()
 	gH_AutoBhopCookie = RegClientCookie("shavit_autobhop", "Autobhop cookie", CookieAccess_Protected);
 
 	// Timescale commandssssssssss
-	RegConsoleCmd("sm_timescale", Command_Timescale, "Sets your timescale on TAS styles.");
-	RegConsoleCmd("sm_ts", Command_Timescale, "Sets your timescale on TAS styles.");
-	RegConsoleCmd("sm_timescaleplus", Command_TimescalePlus, "Adds the value to your current timescale.");
-	RegConsoleCmd("sm_tsplus", Command_TimescalePlus, "Adds the value to your current timescale.");
-	RegConsoleCmd("sm_timescaleminus", Command_TimescaleMinus, "Subtracts the value from your current timescale.");
-	RegConsoleCmd("sm_tsminus", Command_TimescaleMinus, "Subtracts the value from your current timescale.");
+	// RegConsoleCmd("sm_timescale", Command_Timescale, "Sets your timescale on TAS styles.");
+	// RegConsoleCmd("sm_ts", Command_Timescale, "Sets your timescale on TAS styles.");
+	// RegConsoleCmd("sm_timescaleplus", Command_TimescalePlus, "Adds the value to your current timescale.");
+	// RegConsoleCmd("sm_tsplus", Command_TimescalePlus, "Adds the value to your current timescale.");
+	// RegConsoleCmd("sm_timescaleminus", Command_TimescaleMinus, "Subtracts the value from your current timescale.");
+	// RegConsoleCmd("sm_tsminus", Command_TimescaleMinus, "Subtracts the value from your current timescale.");
 
 	#if DEBUG
 	RegConsoleCmd("sm_finishtest", Command_FinishTest);
@@ -412,6 +444,7 @@ public void OnPluginStart()
 	RegAdminCmd("sm_wipeplayer", Command_WipePlayer, ADMFLAG_BAN, "Wipes all bhoptimer data for specified player. Usage: sm_wipeplayer <steamid3>");
 	RegAdminCmd("sm_wipetrack", Command_WipeTrack, ADMFLAG_ROOT, "Deletes all runs on a track.");
 	RegAdminCmd("sm_migration", Command_Migration, ADMFLAG_ROOT, "Force a database migration to run. Usage: sm_migration <migration id> or \"all\" to run all migrations.");
+	RegAdminCmd("sm_sqlrefresh", Command_RefreshDB, ADMFLAG_ROOT, "Attempts to reconnect to the database");
 	// commands END
 
 	// logs
@@ -436,7 +469,7 @@ public void OnPluginStart()
 	gCV_HijackTeleportAngles = new Convar("shavit_core_hijack_teleport_angles", "0", "Whether to hijack player angles on teleport so their latency doesn't fuck up their shit.", 0, true, 0.0, true, 1.0);
 	gCV_DefaultStyle.AddChangeHook(OnConVarChanged);
 
-	Anti_sv_cheats_cvars();
+	// Anti_sv_cheats_cvars();
 
 	Convar.AutoExecConfig();
 
@@ -679,6 +712,9 @@ public void OnMapStart()
 	{
 		SetFailState("Could not load the chat messages configuration file. Make sure it exists (addons/sourcemod/configs/shavit-messages.cfg) and follows the proper syntax!");
 	}
+
+	gCV_Enabled = FindConVar("snt_sp_is_skurf");
+	RefreshTrackNames();
 }
 
 public void OnMapEnd()
@@ -687,8 +723,111 @@ public void OnMapEnd()
 	gB_KZMap = empty;
 }
 
+void CleanSwitchTeam(int client, int team)
+{
+	if (gEV_Type == Engine_CSGO && GetClientTeam(client) == team)
+	{
+		// Close the team menu when selecting your own team...
+		Event event = CreateEvent("player_team");
+		event.SetInt("userid", GetClientUserId(client));
+		event.SetInt("team", team);
+		event.SetBool("silent", true);
+		event.FireToClient(client);
+		event.Cancel();
+	}
+
+	if(gEV_Type == Engine_TF2)
+	{
+		TF2_ChangeClientTeam(client, view_as<TFTeam>(team));
+	}
+	else if(team != 1)
+	{
+		CS_SwitchTeam(client, team);
+	}
+	else
+	{
+		// Remove flashlight :)
+		if (gEV_Type == Engine_CSS)
+		{
+			int EF_DIMLIGHT = 4;
+			SetEntProp(client, Prop_Send, "m_fEffects", ~EF_DIMLIGHT & GetEntProp(client, Prop_Send, "m_fEffects"));
+		}
+
+		ChangeClientTeam(client, team);
+	}
+}
+
+public Action Command_RefreshDB(int client, int args)
+{
+	SQL_DBConnect();
+	return Plugin_Handled;
+}
+
+public Action Command_Spec(int client, int args)
+{
+	if(!IsValidClient(client))
+	{
+		return Plugin_Handled;
+	}
+
+	CleanSwitchTeam(client, 1);
+
+	int target = -1;
+
+	if(args > 0)
+	{
+		char sArgs[MAX_TARGET_LENGTH];
+		GetCmdArgString(sArgs, MAX_TARGET_LENGTH);
+
+		target = FindTarget(client, sArgs, false, false);
+
+		if(target == -1)
+		{
+			return Plugin_Handled;
+		}
+	}
+	else if (gB_ReplayPlayback)
+	{
+		target = Shavit_GetReplayBotIndex(0, -1); // try to find normal bot
+
+		if (target < 1)
+		{
+			int last_real_player = -1;
+
+			for (int i = 1; i <= MaxClients; i++)
+			{
+				if (IsValidClient(i, true))
+				{
+					if (IsFakeClient(i))
+					{
+						target = i;
+						break;
+					}
+
+					last_real_player = i;
+				}
+			}
+
+			if (target < 1)
+			{
+				target = last_real_player;
+			}
+		}
+	}
+
+	if(IsValidClient(target, true))
+	{
+		SetEntPropEnt(client, Prop_Send, "m_hObserverTarget", target);
+	}
+
+	return Plugin_Handled;
+}
+
 public Action Command_Timer(int client, int args)
 {
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	Menu menu = new Menu(MenuHandler_Timer);
 	menu.SetTitle("%T", "TimerMenuTitle", client);
 
@@ -733,6 +872,127 @@ public int MenuHandler_Timer(Menu menu, MenuAction action, int param1, int param
 	return 0;
 }
 
+public int Handler_mTrackList(Menu menu, MenuAction action, int param1, int param2)
+{
+	switch (action)
+	{
+		case MenuAction_Select:
+			delete menu;
+
+		case MenuAction_End:
+			delete menu;
+	}
+
+	return 0;
+}
+
+public Action Command_EditTrack(int client, int args)
+{
+	RefreshTrackNames();
+	if (!IsValidClient(client) || client == 0)
+		return Plugin_Handled;
+	
+	if (args == 0)
+	{
+		Shavit_PrintToChat(client, "%sUsage: %s/track %s<mode> %s<id> %s<name>", gS_ChatStrings.sText, gS_ChatStrings.sImproving, gS_ChatStrings.sVariable, gS_ChatStrings.sVariable2, gS_ChatStrings.sText);
+		PrintToChat(client, "modes: list, name");
+		PrintToChat(client, "id: if mode is name, id is the stage id to edit.");
+		PrintToChat(client, "\t0 (Main Surf), 1-20 (Stages 1-20), 21 (Bonus Surf), 22-42 (Bonus 1-20)");
+		PrintToChat(client, "name: if mode is name, the name you want to give to the track.");
+		return Plugin_Handled;
+	}
+
+	char cmdMode[6];
+	GetCmdArg(1, cmdMode, sizeof(cmdMode));
+
+	if (StrEqual(cmdMode, "list", false))
+	{
+		Menu mTrackList = new Menu(Handler_mTrackList, MENU_ACTIONS_DEFAULT);
+		mTrackList.ExitButton = true;
+		mTrackList.SetTitle("Current tracks: ");
+
+		for (int i; i < TRACKS_SIZE; i++)
+		{
+			char sMenuBuffer[64];
+			char sCurTrackName[32];
+			Shavit_GetCustomTrackName(client, i, sCurTrackName, sizeof(sCurTrackName));
+
+			if (Shavit_IsStageValid(i))
+			{
+				FormatEx(sMenuBuffer, sizeof(sMenuBuffer), "%s [Valid]", sCurTrackName);
+				mTrackList.AddItem("X", sMenuBuffer);
+			}
+			else
+			{
+				FormatEx(sMenuBuffer, sizeof(sMenuBuffer), "%s [Not Valid]", sCurTrackName);
+				mTrackList.AddItem("X", sMenuBuffer, ITEMDRAW_DISABLED);
+			}
+		}
+
+		mTrackList.Display(client, 300);
+		return Plugin_Handled;
+	}
+
+	if (StrEqual(cmdMode, "name", false))
+	{
+		if (args < 2)
+		{
+			Shavit_PrintToChat(client, "%sUsage: %s/track %s<id> %s<name>", gS_ChatStrings.sText, gS_ChatStrings.sVariable2, gS_ChatStrings.sVariable, gS_ChatStrings.sVariable2);
+			return Plugin_Handled;
+		}
+	
+		char cmdTrack[6];
+		char cmdName[64];
+		char prevName[64];
+		GetCmdArg(2, cmdTrack, sizeof(cmdTrack));
+		GetCmdArg(3, cmdName, sizeof(cmdName));
+
+		int track = StringToInt(cmdTrack);
+		Format(prevName, sizeof(prevName), "%s", currentTrackInfo[track].trackName);
+
+		if (!Shavit_IsStageValid(track))
+		{
+			Shavit_PrintToChat(client, "%sTrack is not set up! You must have a start and endzone to set a track's name.", gS_ChatStrings.sWarning);
+			return Plugin_Handled;
+		}
+
+		Shavit_PrintToChat(client, "%sChanged track name from [%s%s%s] to [%s%s%s]", gS_ChatStrings.sText, gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText, gS_ChatStrings.sVariable2, cmdName, gS_ChatStrings.sText);
+		currentTrackInfo[track].bTrackHasCustomName = true;
+		currentTrackInfo[track].setName(cmdName);
+		
+		char trackNameEsc[129];
+		gH_SQL.Escape(cmdName, trackNameEsc, sizeof(trackNameEsc));
+
+		char currentMap[64];
+		GetCurrentMap(currentMap, sizeof(currentMap));
+
+		char sQuery[256];
+		FormatEx(sQuery, sizeof(sQuery), "UPDATE %smapzones "
+									..."SET track_name=\"%s\" "
+									..."WHERE (map=\"%s\" AND track=\"%i\");", gS_MySQLPrefix, trackNameEsc, currentMap, track);
+
+		QueryLog(gH_SQL, SQL_UpdateTrackName_Callback, sQuery);
+
+		Call_StartForward(gH_Forwards_OnTrackNameUpdated);
+		Call_PushCell(track);
+		Call_PushStringEx(prevName, sizeof(prevName), SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+		Call_PushCell(64);
+		Call_PushStringEx(cmdName, sizeof(cmdName), SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+		Call_PushCell(64);
+		Call_Finish();
+		return Plugin_Handled;
+	}
+	return Plugin_Handled;
+}
+
+public void SQL_UpdateTrackName_Callback(Database db, DBResultSet results, const char[] error, any data)
+{
+	if (results == null)
+		LogError("Unable to update track name. Reason: %s", error);
+	else
+		RefreshTrackNames();
+}
+
 public Action Command_StartTimer(int client, int args)
 {
 	if(!IsValidClient(client))
@@ -740,8 +1000,12 @@ public Action Command_StartTimer(int client, int args)
 		return Plugin_Handled;
 	}
 
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	char sCommand[16];
 	GetCmdArg(0, sCommand, 16);
+	PrintToServer("Command used: %s", sCommand);
 
 	if(!gCV_Restart.BoolValue)
 	{
@@ -753,44 +1017,85 @@ public Action Command_StartTimer(int client, int args)
 		return Plugin_Handled;
 	}
 
-	int track = Track_Main;
-	bool bForceTeleToStartZone = StrContains(sCommand, "sm_m", false) == 0;
+	int track = Shavit_GetClientTrack(client);
 
-	if(StrContains(sCommand, "sm_b", false) == 0)
+	bool bForceTeleToStartZone;
+	if (args >= 1)
 	{
-		bForceTeleToStartZone = true;
-		// Pull out bonus number for commands like sm_b1 and sm_b2.
-		if ('1' <= sCommand[4] <= ('0' + Track_Bonus_Last))
+		PrintToServer("More than 1 arg");
+		if (StrContains(sCommand, "sm_m") != -1)
 		{
-			track = sCommand[4] - '0';
-		}
-		else if (args < 1)
-		{
-			track = Shavit_GetClientTrack(client);
-		}
-		else
-		{
-			char arg[6];
-			GetCmdArg(1, arg, sizeof(arg));
-			track = StringToInt(arg);
-		}
+			PrintToServer("Command is sm_m");
+			bForceTeleToStartZone = true;
+			// Pull out bonus number for commands like sm_b1 and sm_b2.
+			PrintToServer("sCommand: %s", sCommand);
+			char curTrack[64];
 
-		if (track < Track_Bonus || track > Track_Bonus_Last)
+			GetCmdArg(1, curTrack, sizeof(curTrack));
+
+			PrintToServer("Track user wants: %s", curTrack);
+
+			track = StringToInt(curTrack);
+			PrintToServer("Client wants stage: %i", track);
+
+			if ((track < Track_Main) || (track > Track_Stage_Last) || !Shavit_IsStageValid(track))
+			{
+				Shavit_PrintToChat(client, "%sInvalid Stage Number: %s%i", gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, track);
+				return Plugin_Stop;
+			}
+
+			if ((track <= Track_Stage_Last) || (track > Shavit_GetClientHighestTrack(client)))
+			{
+				Shavit_PrintToChat(client, "%sYou have to reach %s%s%s before you can tele there!", gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, TRACK_NAME, gS_ChatStrings.sWarning);
+				return Plugin_Stop;
+			}
+			else if (track >= Track_Bonus)
+			{
+				Shavit_PrintToChat(client, "%s%s Use %s/bonus or /b %sto tele to a bonus stage!");
+				return Plugin_Handled;
+			}
+
+			PrintToServer("Current Track: %i", track);
+		}
+		else if(StrContains(sCommand, "sm_b", false) != -1)
 		{
-			track = Track_Bonus;
+			bForceTeleToStartZone = true;
+			// Pull out bonus number for commands like sm_b1 and sm_b2.
+			char curTrack[16];
+
+			GetCmdArg(1, curTrack, sizeof(curTrack));
+
+			track = (StringToInt(curTrack) + 20);
+			PrintToServer("Client wants bonus: %s offset: %i", curTrack, track);
+			if ((track < Track_Bonus || (track > Track_Bonus_Last) || !Shavit_IsStageValid(track)))
+			{
+				Shavit_PrintToChat(client, "%sInvalid Stage Number: %s%i", gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, (track - 20));
+				return Plugin_Stop;
+			}
+
+			if ((track <= Track_Bonus_Last) || (track > Shavit_GetClientHighestBonus(client)))
+			{
+				Shavit_PrintToChat(client, "%s%sYou have to reach %s%s%s before you can tele there!", gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, TRACK_NAME, gS_ChatStrings.sWarning);
+				return Plugin_Stop;
+			}
+			else if (track <= Track_Stage_Last)
+			{
+				Shavit_PrintToChat(client, "%sUse %s/main or /m %sto tele to a main stage!", gS_ChatStrings.sText, gS_ChatStrings.sVariable, gS_ChatStrings.sText);
+				return Plugin_Stop;
+			}
+		}
+		else if(StrContains(sCommand, "sm_r", false) == 0 || StrContains(sCommand, "sm_s", false) == 0)
+		{
+			track = (DoIHateMain(client)) ? Track_Main : gA_Timers[client].iTimerTrack;
 		}
 	}
-	else if(StrContains(sCommand, "sm_r", false) == 0 || StrContains(sCommand, "sm_s", false) == 0)
-	{
-		track = (DoIHateMain(client)) ? Track_Main : gA_Timers[client].iTimerTrack;
-	}
+	else
+		track = Shavit_GetClientTrack(client);
+
 
 	if (!gB_Zones || !(Shavit_ZoneExists(Zone_Start, track) || gB_KZMap[track]))
 	{
-		char sTrack[32];
-		GetTrackName(client, track, currentTrackInfo[track], sTrack, 32);
-
-		Shavit_PrintToChat(client, "%T", "StartZoneUndefined", client, gS_ChatStrings.sWarning, gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTrack, gS_ChatStrings.sText);
+		Shavit_PrintToChat(client, "%T", "StartZoneUndefined", client, gS_ChatStrings.sWarning, gS_ChatStrings.sText, gS_ChatStrings.sVariable2, TRACK_NAME, gS_ChatStrings.sText);
 
 		return Plugin_Handled;
 	}
@@ -814,6 +1119,9 @@ public Action Command_IHateMain(int client, int args)
 		return Plugin_Handled;
 	}
 
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	bool bIHateMain = DoIHateMain(client);
 	gH_IHateMain.Set(client, (bIHateMain) ? "0" : "1");
 	Shavit_PrintToChat(client, (bIHateMain) ? ":)" : ":(");
@@ -827,6 +1135,9 @@ public Action Command_TeleportEnd(int client, int args)
 	{
 		return Plugin_Handled;
 	}
+
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
 
 	char sCommand[16];
 	GetCmdArg(0, sCommand, 16);
@@ -889,7 +1200,11 @@ public Action Command_StopTimer(int client, int args)
 		return Plugin_Handled;
 	}
 
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	Shavit_StopTimer(client, false);
+	Shavit_PrintToChat(client, "%sYou %sstopped%s your timer!", gS_ChatStrings.sText, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
 
 	return Plugin_Handled;
 }
@@ -900,6 +1215,9 @@ public Action Command_TogglePause(int client, int args)
 	{
 		return Plugin_Handled;
 	}
+
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
 
 	int iFlags = Shavit_CanPause(client);
 
@@ -990,6 +1308,9 @@ public Action Command_ToggleRepeat(int client, int args)
 		return Plugin_Handled;
 	}
 
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	if (!IsPlayerAlive(client))
 	{
 		Shavit_PrintToChat(client, "%T", "RepeatCommandAlive", client, gS_ChatStrings.sVariable, gS_ChatStrings.sText);
@@ -1014,24 +1335,18 @@ public void ChangeClientRepeat(int client, bool repeat)
 public void CallOnRepeatChanged(int client, bool old_value, bool new_value)
 {
 	gB_PlayerRepeat[client] = new_value;
+	int track = gA_Timers[client].iTimerTrack;
 
 	char sTrack[32];
-	if(gA_Timers[client].iTimerTrack != Track_Main)
+	if(Shavit_GetStageCount(Track_Main) > 1)
 	{
-		GetTrackName(client, gA_Timers[client].iTimerTrack, currentTrackInfo[gA_Timers[client].iTimerTrack], sTrack, 32);		
+		FormatEx(sTrack, 32, "%T %d", "StageText", client, gA_Timers[client].iLastStage);			
 	}
 	else
 	{
-		if(Shavit_GetStageCount(Track_Main) > 1)
-		{
-			FormatEx(sTrack, 32, "%T %d", "StageText", client, gA_Timers[client].iLastStage);			
-		}
-		else
-		{
-			gB_PlayerRepeat[client] = false;
-			Shavit_PrintToChat(client, "%T", "RepeatOnLinearMap", client);
-			return;
-		}
+		gB_PlayerRepeat[client] = false;
+		Shavit_PrintToChat(client, "%T", "RepeatOnLinearMap", client);
+		return;
 	}
 
 	if(gB_PlayerRepeat[client])
@@ -1039,7 +1354,7 @@ public void CallOnRepeatChanged(int client, bool old_value, bool new_value)
 		if(Shavit_RestartTimer(client, gA_Timers[client].iTimerTrack, false, false))
 		{
 			gA_Timers[client].bOnlyStageMode = true;
-			Shavit_PrintToChat(client, "%T",  "EnabledTimerRepeat", client, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);
+			Shavit_PrintToChat(client, "%T",  "EnabledTimerRepeat", client, gS_ChatStrings.sVariable, TRACK_NAME, gS_ChatStrings.sText);
 		}
 		else
 		{
@@ -1048,7 +1363,7 @@ public void CallOnRepeatChanged(int client, bool old_value, bool new_value)
 	}
 	else
 	{
-		Shavit_PrintToChat(client, "%T",  "DisableTimerRepeat", client, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);
+		Shavit_PrintToChat(client, "%T",  "DisableTimerRepeat", client, gS_ChatStrings.sVariable, TRACK_NAME, gS_ChatStrings.sText);
 	}
 }
 
@@ -1058,6 +1373,9 @@ public Action Command_Timescale(int client, int args)
 	{
 		return Plugin_Handled;
 	}
+
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
 
 	if (GetStyleSettingFloat(gA_Timers[client].bsStyle, "tas_timescale") != -1.0)
 	{
@@ -1089,6 +1407,9 @@ public Action Command_TimescalePlus(int client, int args)
 	{
 		return Plugin_Handled;
 	}
+
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
 
 	if (GetStyleSettingFloat(gA_Timers[client].bsStyle, "tas_timescale") != -1.0)
 	{
@@ -1126,6 +1447,9 @@ public Action Command_TimescaleMinus(int client, int args)
 	{
 		return Plugin_Handled;
 	}
+
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
 
 	if (GetStyleSettingFloat(gA_Timers[client].bsStyle, "tas_timescale") != -1.0)
 	{
@@ -1195,6 +1519,9 @@ public Action Command_Fling(int client, int args)
 
 public Action Command_DeleteMap(int client, int args)
 {
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	if(args == 0)
 	{
 		ReplyToCommand(client, "Usage: sm_deletemap <map>\nOnce a map is chosen, \"sm_deletemap confirm\" to run the deletion.");
@@ -1249,6 +1576,9 @@ public Action Command_NoclipSpeed(int client, int args)
 		return Plugin_Handled;
 	}
 
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	if(args == 0)
 	{
 		Shavit_PrintToChat(client, "%T", "ArgumentsMissing", client, "sm_noclipspeed <value> (2-30)");
@@ -1284,6 +1614,9 @@ public Action Command_NoclipSpeed(int client, int args)
 
 public Action Command_Migration(int client, int args)
 {
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	if(args == 0)
 	{
 		ReplyToCommand(client, "Usage: sm_migration <migration id or \"all\" to run all migrationsd>.");
@@ -1327,6 +1660,9 @@ public Action Command_Migration(int client, int args)
 
 public Action Command_WipePlayer(int client, int args)
 {
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
+
 	if(args == 0)
 	{
 		ReplyToCommand(client, "Usage: sm_wipeplayer <steamid3>\nAfter entering a SteamID, you will be prompted with a verification captcha.");
@@ -1490,7 +1826,9 @@ public Action Command_Style(int client, int args)
 	{
 		return Plugin_Handled;
 	}
-
+	
+	if (!gCV_Enabled.BoolValue)
+		return Plugin_Handled;
 	// allow !style <number>
 	if (args > 0)
 	{
@@ -1615,6 +1953,7 @@ public int StyleMenu_Handler(Menu menu, MenuAction action, int param1, int param
 void CallOnTrackChanged(int client, int oldtrack, int newtrack)
 {
 	gA_Timers[client].iTimerTrack = newtrack;
+	int track = newtrack;
 
 	Call_StartForward(gH_Forwards_OnTrackChanged);
 	Call_PushCell(client);
@@ -1626,29 +1965,21 @@ void CallOnTrackChanged(int client, int oldtrack, int newtrack)
 	{
 		if(gB_PlayerRepeat[client])
 		{
-			char sTrack[32];
 			if(newtrack != Track_Main)
 			{
-				GetTrackName(client, newtrack, currentTrackInfo[newtrack], sTrack, 32);
-				Shavit_PrintToChat(client, "%T", "EnabledTimerRepeat", client, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);				
+				Shavit_PrintToChat(client, "%T", "EnabledTimerRepeat", client, gS_ChatStrings.sVariable, TRACK_NAME, gS_ChatStrings.sText);				
 			}
 			else if(Shavit_GetStageCount(newtrack) < 2)
 			{
-				GetTrackName(client, oldtrack, currentTrackInfo[oldtrack], sTrack, 32);
 				ChangeClientRepeat(client, false);
-				Shavit_PrintToChat(client, "%T", "DisableTimerRepeat", client, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);	
+				Shavit_PrintToChat(client, "%T", "DisableTimerRepeat", client, gS_ChatStrings.sVariable, TRACK_NAME, gS_ChatStrings.sText);	
 			}
 			else
 			{
-				FormatEx(sTrack, 32, "%T 1", "StageText", client);
-				Shavit_PrintToChat(client, "%T", "EnabledTimerRepeat", client, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);	
+				FormatEx(TRACK_NAME, 32, "%T 1", "StageText", client);
+				Shavit_PrintToChat(client, "%T", "EnabledTimerRepeat", client, gS_ChatStrings.sVariable, TRACK_NAME, gS_ChatStrings.sText);	
 			}
 		}
-		else if (oldtrack == Track_Main && !DoIHateMain(client))
-		{
-			Shavit_StopChatSound();
-			Shavit_PrintToChat(client, "%T", "TrackChangeFromMain", client, gS_ChatStrings.sVariable, gS_ChatStrings.sText, gS_ChatStrings.sVariable, gS_ChatStrings.sText);
-		}		
 	}
 }
 
@@ -1787,7 +2118,7 @@ void ChangeClientStyle(int client, int style, bool manual)
 		Shavit_PrintToChat(client, "%T", "UnrankedWarning", client, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
 	}
 
-	int aa_old = RoundToZero(GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate"));
+	int aa_old = RoundToZero(300.0);
 	int aa_new = RoundToZero(GetStyleSettingFloat(style, "airaccelerate"));
 
 	if(aa_old != aa_new)
@@ -1963,6 +2294,60 @@ public int Native_GetDatabase(Handle handler, int numParams)
 	return gH_SQL ? view_as<int>(CloneHandle(gH_SQL, handler)) : 0;
 }
 
+public void Shavit_OnTrackNameUpdated(int track, const char[] old_name, int old_size, const char[] new_name, int new_size)
+{
+	currentTrackInfo[track].setName(new_name);
+
+	if (StrContains(new_name, "Stage ") || StrContains(new_name, "Bonus ") || StrEqual(new_name, "Main Surf") || StrEqual(new_name, "Bonus Surf"))
+		currentTrackInfo[track].bTrackHasCustomName = false;
+	else
+		currentTrackInfo[track].bTrackHasCustomName = true;
+}
+
+public int Native_GetTrackInfo(Handle plugin, int numParams)
+{
+	if (GetNativeCell(3) != sizeof(currentTrackInfo))
+		return ThrowNativeError(200, "track_info does not match latest(got %i expected %i). Please update your includes and recompile your plugins", GetNativeCell(3), sizeof(currentTrackInfo));
+
+	int track = GetNativeCell(1);
+	return SetNativeArray(2, currentTrackInfo[track], GetNativeCell(3));
+}
+
+public any Native_GetCustomTrackName(Handle plugin, int numParams)
+{
+	int client = GetNativeCell(1);
+	int track = GetNativeCell(2);
+	if (currentTrackInfo[track].bTrackHasCustomName)
+	{
+		SetNativeString(3, currentTrackInfo[track].trackName, GetNativeCell(4));
+		return true;
+	}
+	else
+	{
+		char output[64];
+		if (track == 0)
+			FormatEx(output, sizeof(output), "%T", "Track_Main", client);
+		else if (track <= Track_Stage_Last)
+			FormatEx(output, sizeof(output), "%T", "Track_Stage", client, track);
+		else if (track == (Track_Stage_Last + 1))
+			FormatEx(output, sizeof(output), "%T", "Track_Bonus_NoNum", client);
+		else if (track == 22)
+			FormatEx(output, sizeof(output), "%T", "Track_Bonus", client, (track - 21));
+		else if ((track >= (Track_Bonus + 1)) && (track < TRACKS_SIZE))
+			FormatEx(output, sizeof(output), "%T", "Track_Bonus", client, (track - 21));
+		else
+			FormatEx(output, sizeof(output), "%T", "Track_Unknown", client);
+
+		SetNativeString(3, output, GetNativeCell(4));
+		return false;
+	}
+}
+
+public void Native_RefreshTracks(Handle plugin, int numParams)
+{
+	RefreshTrackNames();
+}
+
 public int Native_GetClientTime(Handle handler, int numParams)
 {
 	return view_as<int>(gA_Timers[GetNativeCell(1)].fCurrentTime);
@@ -1980,11 +2365,29 @@ public int Native_GetClientTrack(Handle handler, int numParams)
 	return gA_Timers[GetNativeCell(1)].iTimerTrack;
 }
 
+public int Native_GetClientHighestTrack(Handle handler, int numParams)
+{
+	return gA_Timers[GetNativeCell(1)].iHighestTrack;
+}
+
+public int Native_GetClientHighestBonus(Handle handler, int numParams)
+{
+	return gA_Timers[GetNativeCell(1)].iHighestBonus;
+}
+
 public int Native_SetClientTrack(Handle handler, int numParams)
 {
 	int client = GetNativeCell(1);
+	int track = GetNativeCell(2);
 
-	CallOnTrackChanged(client, gA_Timers[client].iTimerTrack, GetNativeCell(2));
+	if (track <= 20)
+		if (track > Shavit_GetClientTrack(client))
+			gA_Timers[client].iHighestTrack = track;
+	else if (track >= 21)
+		if (track > Shavit_GetClientTrack(client))
+			gA_Timers[client].iHighestBonus = track;
+
+	CallOnTrackChanged(client, gA_Timers[client].iTimerTrack, track);
 	return 0;
 }
 
@@ -2439,11 +2842,6 @@ public int Native_ResumeTimer(Handle handler, int numParams)
 
 	ResumeTimer(client);
 
-	if(numParams >= 2 && view_as<bool>(GetNativeCell(2))) // teleport?
-	{
-		TeleportEntity(client, gF_PauseOrigin[client], gF_PauseAngles[client], gF_PauseVelocity[client]);
-	}
-
 	return 1;
 }
 
@@ -2571,6 +2969,11 @@ public int Native_RestartTimer(Handle handler, int numParams)
 		{
 			return 0;
 		}
+	}
+
+	if (tostartzone)
+	{
+		Shavit_TeleportToStartZone(client, track, 0);
 	}
 
 	if (gA_Timers[client].bTimerEnabled && !Shavit_StopTimer(client, force))
@@ -2893,7 +3296,7 @@ public int Native_GetClientLastStage(Handle plugin, int numParams)
 
 public int Native_SetClientLastStage(Handle handler, int numParams)
 {
-	ChangeClientLastStage(GetNativeCell(1), GetNativeCell(2));
+	gA_Timers[GetNativeCell(1)].iLastStage = GetNativeCell(2);
 	return 1;
 }
 
@@ -2931,6 +3334,11 @@ public any Native_ShouldProcessFrame(Handle plugin, int numParams)
 	int client = GetNativeCell(1);
 	return gA_Timers[client].fTimescale == 1.0
 	    || gA_Timers[client].fNextFrameTime <= 0.0;
+}
+
+public void Native_GetSQLPrefix(Handle plugin, int numParams)
+{
+	SetNativeString(1, gS_MySQLPrefix, GetNativeCell(2));
 }
 
 public Action Shavit_OnStartPre(int client, int track)
@@ -2988,19 +3396,19 @@ void StartTimer(int client, int track)
 	GetEntPropVector(client, Prop_Data, "m_vecVelocity", fSpeed);
 	float curVel = SquareRoot(Pow(fSpeed[0], 2.0) + Pow(fSpeed[1], 2.0));
 
-	int nozaxisspeed = GetStyleSettingInt(gA_Timers[client].bsStyle, "nozaxisspeed");
+	// int nozaxisspeed = GetStyleSettingInt(gA_Timers[client].bsStyle, "nozaxisspeed");
 
-	if (nozaxisspeed < 0)
-	{
-		nozaxisspeed = gCV_NoZAxisSpeed.BoolValue;
-	}
+	// if (nozaxisspeed < 0)
+	// {
+	// 	nozaxisspeed = gCV_NoZAxisSpeed.BoolValue;
+	// }
 
-	if (!nozaxisspeed ||
-		GetStyleSettingInt(gA_Timers[client].bsStyle, "prespeed") == 1 ||
-		(fSpeed[2] == 0.0 && (GetStyleSettingInt(gA_Timers[client].bsStyle, "prespeed") == 2 || curVel <= 50.0 ||
-			((curVel <= ClientMaxPrestrafe(client) && gA_Timers[client].bOnGround &&
-			  (gI_LastTickcount[client]-gI_FirstTouchedGround[client] > RoundFloat(0.5/GetTickInterval()))))))) // beautiful
-	{
+	// if (!nozaxisspeed ||
+	// 	GetStyleSettingInt(gA_Timers[client].bsStyle, "prespeed") == 1 ||
+	// 	(fSpeed[2] == 0.0 && (GetStyleSettingInt(gA_Timers[client].bsStyle, "prespeed") == 2 || curVel <= 50.0 ||
+	// 		((curVel <= ClientMaxPrestrafe(client) && gA_Timers[client].bOnGround &&
+	// 		  (gI_LastTickcount[client]-gI_FirstTouchedGround[client] > RoundFloat(0.5/GetTickInterval()))))))) // beautiful
+	// {
 		Action result = Plugin_Continue;
 		Call_StartForward(gH_Forwards_StartPre);
 		Call_PushCell(client);
@@ -3074,7 +3482,7 @@ void StartTimer(int client, int track)
 			UpdateLaggedMovement(client, true);
 
 			SetEntityGravity(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "gravity"));
-		}
+		// }
 #if 0
 		else if(result == Plugin_Handled || result == Plugin_Stop)
 		{
@@ -3388,8 +3796,93 @@ void SQL_DBConnect()
 	SQL_CreateTables(gH_SQL, gS_MySQLPrefix, gI_Driver);
 }
 
+void SQL_GetTrackInfo(int track)
+{
+	char currentMap[64];
+	GetCurrentMap(currentMap, sizeof(currentMap));
+	
+	char sQuery[512];
+	FormatEx(sQuery, sizeof(sQuery), "SELECT track_name " 
+								  ..."FROM %smapzones "
+								  ..."WHERE (map=\"%s\" AND track=\"%i\");",
+									 gS_MySQLPrefix, currentMap, track);
+
+	SQL_TQuery(gH_SQL, SQL_GetTrackInfo_Callback, sQuery, track);
+}
+
+public void SQL_GetTrackInfo_Callback(Database db, DBResultSet results, const char[] error, any track)
+{
+	if (results == null)
+	{
+		LogError("[SHAVIT] CORE (SQL_GetTrackInfo_Callback): Unable to get track info from database (Reason: %s)", error);
+		return;
+	}
+
+	while (SQL_FetchRow(results))
+	{
+		char sResult[64];
+		SQL_FetchString(results, 0, sResult, sizeof(sResult));
+
+		if (!StrEqual(sResult, "HANDLED_BY_PLUGIN"))
+		{
+			currentTrackInfo[track].bTrackHasCustomName = true;
+			currentTrackInfo[track].setName(sResult);
+			Call_StartForward(gH_Forwards_SQL_NameRetrieved);
+			Call_PushCell(track);
+			Call_PushStringEx(sResult, 64, SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+			Call_PushCell(64);
+			Call_PushCellRef(currentTrackInfo[track].bTrackHasCustomName);
+			Call_Finish();
+		}
+		else
+		{
+			char output[64];
+			if (track == 0)
+				FormatEx(output, sizeof(output), "%T", "Track_Main", 0);
+			else if (track <= Track_Stage_Last)
+				FormatEx(output, sizeof(output), "%T", "Track_Stage", 0, track);
+			else if (track == (Track_Stage_Last + 1))
+				FormatEx(output, sizeof(output), "%T", "Track_Bonus_NoNum", 0);
+			else if (track == 22)
+				FormatEx(output, sizeof(output), "%T", "Track_Bonus", 0, (track - 21));
+			else if ((track >= (Track_Bonus + 1)) && (track < TRACKS_SIZE))
+				FormatEx(output, sizeof(output), "%T", "Track_Bonus", 0, (track - 21));
+			else
+				FormatEx(output, sizeof(output), "%T", "Track_Unknown", 0);
+
+			currentTrackInfo[track].setName(output);
+
+			Call_StartForward(gH_Forwards_SQL_NameRetrieved);
+			Call_PushCell(track);
+			Call_PushStringEx(output, 64, SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+			Call_PushCell(64);
+			Call_PushCellRef(currentTrackInfo[track].bTrackHasCustomName);
+			Call_Finish();
+		}
+	}	
+}
+
+void RefreshTrackNames()
+{
+	for (int i; i < TRACKS_SIZE; i++)
+		SQL_GetTrackInfo(i);
+}
+
+public void Shavit_OnDatabaseLoaded()
+{
+	RefreshTrackNames();
+}
+
+public void Shavit_OnTrackNameRetrievedSQL(int track, const char[] track_name, int maxlength, bool& custom_name)
+{
+	currentTrackInfo[track].bTrackHasCustomName = custom_name;
+	currentTrackInfo[track].setName(track_name);
+}
+
 public void Shavit_OnEnterZone(int client, int type, int track, int id, int entity)
 {
+	SQL_GetTrackInfo(track);
+
 	if(type == Zone_Airaccelerate)
 	{
 		gF_ZoneAiraccelerate[client] = float(Shavit_GetZoneData(id));
@@ -3406,7 +3899,7 @@ public void Shavit_OnLeaveZone(int client, int type, int track, int id, int enti
 {
 	if(type == Zone_Airaccelerate)
 	{
-		UpdateAiraccelerate(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate"));
+		UpdateAiraccelerate(client, 300.0);
 	}
 }
 
@@ -3414,15 +3907,6 @@ public void PreThinkPost(int client)
 {
 	if(IsPlayerAlive(client))
 	{
-		if(!gB_Zones || !Shavit_InsideZone(client, Zone_Airaccelerate, -1))
-		{
-			sv_airaccelerate.FloatValue = GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate");
-		}
-		else
-		{
-			sv_airaccelerate.FloatValue = gF_ZoneAiraccelerate[client];
-		}
-
 		if(sv_enablebunnyhopping != null)
 		{
 			sv_enablebunnyhopping.BoolValue = GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping");
@@ -3755,8 +4239,6 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		return Plugin_Continue;
 	}
 
-	Remove_sv_cheat_Impluses(client, impulse);
-
 	int flags = GetEntityFlags(client);
 
 	// if (gA_Timers[client].bClientPaused && IsPlayerAlive(client) && !gCV_PauseMovement.BoolValue)
@@ -3875,7 +4357,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	}
 
 	// key blocking
-	if(!gA_Timers[client].bCanUseAllKeys && mtMoveType != MOVETYPE_NOCLIP && mtMoveType != MOVETYPE_LADDER && !(gB_Zones && Shavit_InsideZone(client, Zone_Freestyle, -1)))
+	if(!gA_Timers[client].bCanUseAllKeys && mtMoveType != MOVETYPE_NOCLIP && mtMoveType != MOVETYPE_LADDER)
 	{
 		// block E
 		if (GetStyleSettingBool(gA_Timers[client].bsStyle, "block_use") && (buttons & IN_USE) > 0)
@@ -4022,11 +4504,11 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	// enable duck-jumping/bhop in tf2
 	if (gEV_Type == Engine_TF2 && GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping") && (buttons & IN_JUMP) > 0 && iGroundEntity != -1)
 	{
-		float fSpeed[3];
-		GetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", fSpeed);
+		// float fSpeed[3];
+		// GetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", fSpeed);
 
-		fSpeed[2] = 289.0;
-		SetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", fSpeed);
+		// fSpeed[2] = 289.0;
+		// SetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", fSpeed);
 	}
 
 	if (GetStyleSettingBool(gA_Timers[client].bsStyle, "autobhop") && gB_Auto[client] && (buttons & IN_JUMP) > 0 && mtMoveType == MOVETYPE_WALK && !bInWater)
@@ -4287,5 +4769,5 @@ void UpdateStyleSettings(int client)
 		sv_enablebunnyhopping.ReplicateToClient(client, (GetStyleSettingBool(gA_Timers[client].bsStyle, "bunnyhopping"))? "1":"0");
 	}
 
-	UpdateAiraccelerate(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "airaccelerate"));
+	UpdateAiraccelerate(client, 300.0);
 }

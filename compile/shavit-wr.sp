@@ -396,46 +396,6 @@ public void OnLibraryRemoved(const char[] name)
 	}
 }
 
-void SQL_GetTrackInfo(int track)
-{
-	char currentMap[64];
-	GetCurrentMap(currentMap, sizeof(currentMap));
-	
-	char sQuery[512];
-	FormatEx(sQuery, sizeof(sQuery), "SELECT track_name " 
-								  ..."FROM %smapzones "
-								  ..."WHERE (map=\"%s\" AND track=\"%i\");",
-									 gS_MySQLPrefix, currentMap, track);
-
-	SQL_TQuery(gH_SQL, SQL_GetTrackInfo_Callback, sQuery, track);
-}
-
-public void SQL_GetTrackInfo_Callback(Database db, DBResultSet results, const char[] error, any track)
-{
-	if (results == null)
-	{
-		LogError("[SQL_GetTrackInfo_Callback] Unable to get track info from database (Reason: %s)", error);
-		return;
-	}
-
-	while (SQL_FetchRow(results))
-	{
-		char sResult[64];
-		SQL_FetchString(results, 0, sResult, sizeof(sResult));
-		if (!StrEqual(sResult, "HANDLED_BY_PLUGIN"))
-		{
-			currentTrackInfo[track].bTrackHasCustomName = true;
-			Format(currentTrackInfo[track].trackName, sizeof(currentTrackInfo.trackName), "%s", sResult);
-		}
-	}	
-}
-
-public void Shavit_OnTrackNameUpdated(int track, char[] old_name, int old_size, char[] new_name, int new_size)
-{
-	Shavit_RefreshTracks();
-	SQL_GetTrackInfo(track);
-}
-
 public Action Timer_Dominating(Handle timer)
 {
 	bool bHasWR[MAXPLAYERS+1];
@@ -1584,11 +1544,9 @@ public Action Command_Delete(int client, int args)
 		int records = GetTrackRecordCount(i);
 
 		char sTrack[64];
-		GetTrackName(client, i, currentTrackInfo[i], sTrack, 64);
-
 		if(records > 0)
 		{
-			Format(sTrack, 64, "%s (%T: %d)", sTrack, "WRRecord", client, records);
+			Format(sTrack, 64, "%s (%T: %d)", currentTrackInfo[i].trackName, "WRRecord", client, records);
 		}
 
 		menu.AddItem(sInfo, sTrack, (records > 0)? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
@@ -1757,11 +1715,8 @@ public int MenuHandler_DeleteAll_Stage_Second(Menu menu, MenuAction action, int 
 
 void DeleteAllStageSubmenu(int client)
 {
-	char sTrack[32];
-	GetTrackName(client, gA_WRCache[client].iLastTrack, currentTrackInfo[gA_WRCache[client].iLastTrack], sTrack, 32);
-
 	Menu menu = new Menu(MenuHandler_DeleteAllStage);
-	menu.SetTitle("%T\n ", "DeleteAllRecordsMenuTitle", client, gS_Map, "Stage", sTrack, gS_StyleStrings[gA_WRCache[client].iLastStyle].sStyleName);
+	menu.SetTitle("%T\n ", "DeleteAllRecordsMenuTitle", client, gS_Map, "Stage", currentTrackInfo[gA_WRCache[client].iLastTrack].trackName, gS_StyleStrings[gA_WRCache[client].iLastStyle].sStyleName);
 
 	char sMenuItem[64];
 
@@ -1839,11 +1794,9 @@ public Action Command_DeleteAll(int client, int args)
 		int iRecords = GetTrackRecordCount(i);
 
 		char sTrack[64];
-		GetTrackName(client, i, currentTrackInfo[i], sTrack, 64);
-
 		if(iRecords > 0)
 		{
-			Format(sTrack, 64, "%s (%T: %d)", sTrack, "WRRecord", client, iRecords);
+			Format(sTrack, 64, "%s (%T: %d)", currentTrackInfo[i].trackName, "WRRecord", client, iRecords);
 		}
 
 		menu.AddItem(sInfo, sTrack, (iRecords > 0)? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
@@ -1864,11 +1817,8 @@ public int MenuHandler_DeleteAll_First(Menu menu, MenuAction action, int param1,
 		int iTrack = gA_WRCache[param1].iLastTrack = StringToInt(sInfo);
 		gA_WRCache[param1].iLastStage = 0;
 
-		char sTrack[64];
-		GetTrackName(param1, iTrack, currentTrackInfo[iTrack], sTrack, 64);
-
 		Menu subMenu = new Menu(MenuHandler_DeleteAll_Second);
-		subMenu.SetTitle("%T\n ", "DeleteTrackAllStyle", param1, sTrack);
+		subMenu.SetTitle("%T\n ", "DeleteTrackAllStyle", param1, currentTrackInfo[iTrack].trackName);
 
 		int[] styles = new int[gI_Styles];
 		Shavit_GetOrderedStyles(styles, gI_Styles);
@@ -1932,11 +1882,8 @@ public int MenuHandler_DeleteAll_Second(Menu menu, MenuAction action, int param1
 
 void DeleteAllSubmenu(int client)
 {
-	char sTrack[32];
-	GetTrackName(client, gA_WRCache[client].iLastTrack, currentTrackInfo[gA_WRCache[client].iLastTrack], sTrack, 32);
-
 	Menu menu = new Menu(MenuHandler_DeleteAll);
-	menu.SetTitle("%T\n ", "DeleteAllRecordsMenuTitle", client, gS_Map, "Track", sTrack, gS_StyleStrings[gA_WRCache[client].iLastStyle].sStyleName);
+	menu.SetTitle("%T\n ", "DeleteAllRecordsMenuTitle", client, gS_Map, "Track", currentTrackInfo[gA_WRCache[client].iLastTrack].trackName, gS_StyleStrings[gA_WRCache[client].iLastStyle].sStyleName);
 
 	char sMenuItem[64];
 
@@ -1973,11 +1920,8 @@ public int MenuHandler_DeleteAll(Menu menu, MenuAction action, int param1, int p
 			return 0;
 		}
 
-		char sTrack[32];
-		GetTrackName(LANG_SERVER, gA_WRCache[param1].iLastTrack, currentTrackInfo[gA_WRCache[param1].iLastTrack], sTrack, 32);
-
 		Shavit_LogMessage("%L - deleted all %s track and %s style records from map `%s`.",
-			param1, sTrack, gS_StyleStrings[gA_WRCache[param1].iLastStyle].sStyleName, gS_Map);
+			param1, currentTrackInfo[gA_WRCache[param1].iLastTrack].trackName, gS_StyleStrings[gA_WRCache[param1].iLastStyle].sStyleName, gS_Map);
 
 		char sQuery[512];
 		FormatEx(sQuery, sizeof(sQuery), "DELETE FROM %splayertimes WHERE map = '%s' AND style = %d AND track = %d;",
@@ -2054,11 +1998,11 @@ public void SQL_OpenDelete_Callback(Database db, DBResultSet results, const char
 	}
 
 	int iStyle = gA_WRCache[client].iLastStyle;
-	char sTrack[32];
+	char sTrack[64];
 
 	if (gA_WRCache[client].iLastStage == 0)
 	{
-		GetTrackName(client, gA_WRCache[client].iLastTrack, currentTrackInfo[gA_WRCache[client].iLastTrack], sTrack, sizeof(sTrack));
+		FormatEx(sTrack, sizeof(sTrack), "%s", currentTrackInfo[gA_WRCache[client].iLastTrack].trackName);
 	}
 	else
 	{
@@ -2368,8 +2312,6 @@ public void DeleteConfirm_Callback(Database db, DBResultSet results, const char[
 		}
 	}
 
-	char sTrack[32];
-	GetTrackName(LANG_SERVER, iTrack, currentTrackInfo[iTrack], sTrack, 32);
 	
 	char sStage[32];
 	FormatEx(sStage, sizeof(sStage), "| Stage: %d ", iStage);
@@ -2379,7 +2321,7 @@ public void DeleteConfirm_Callback(Database db, DBResultSet results, const char[
 
 	// above the client == 0 so log doesn't get lost if admin disconnects between deleting record and query execution
 	Shavit_LogMessage("Admin [U:1:%u] - deleted %srecord. Runner: %s ([U:1:%u]) | Map: %s | Style: %s | Track: %s %s| Time: %.2f (%s) | Strafes: %d (%.1f%%) | Jumps: %d (%.1f%%) | Run date: %s | Record ID: %d",
-		admin_steamid, (iStage == 0) ? "":"stage ", sName, iSteamID, sMap, gS_StyleStrings[iStyle].sStyleName, sTrack, (iStage == 0) ? "":sStage, fTime, (bWRDeleted)? "WR":"not WR", iStrafes, fSync, iJumps, fPerfectJumps, sDate, iRecordID);
+		admin_steamid, (iStage == 0) ? "":"stage ", sName, iSteamID, sMap, gS_StyleStrings[iStyle].sStyleName, currentTrackInfo[iTrack].trackName, (iStage == 0) ? "":sStage, fTime, (bWRDeleted)? "WR":"not WR", iStrafes, fSync, iJumps, fPerfectJumps, sDate, iRecordID);
 
 	for (int i = 1; i <= MaxClients; i++)
 	{
@@ -2936,15 +2878,11 @@ public void SQL_WR_Callback(Database db, DBResultSet results, const char[] error
 			FormatEx(sRanks, 32, "(#%d/%d)", iMyRank, iRecords);
 		}
 
-		char sTrack[32];
+		char sTrack[64];
 		if(stage == 0)
-		{
-			GetTrackName(client, track, currentTrackInfo[track], sTrack, 32);
-		}
+			FormatEx(sTrack, sizeof(sTrack), "%s", currentTrackInfo[track].trackName);
 		else
-		{
 			FormatEx(sTrack, sizeof(sTrack), "%T %d", "WRStage", client, stage);
-		}	
 
 		FormatEx(sFormattedTitle, 192, "%T %s: [%s]\n%s", "WRRecordFor", client, sMap, sTrack, sRanks);
 		hMenu.SetTitle(sFormattedTitle);
@@ -3171,15 +3109,10 @@ public void SQL_RR_Callback(Database db, DBResultSet results, const char[] error
 		int stage = results.FetchInt(6);
 
 		char sTrack[32];
-
 		if(stage == 0)
-		{
-			GetTrackName(client, track, currentTrackInfo[track], sTrack, 32);
-		}
+			FormatEx(sTrack, sizeof(sTrack), "%s", currentTrackInfo[track].trackName);
 		else
-		{
 			FormatEx(sTrack, sizeof(sTrack), "%T %d", "WRStage", client, stage);
-		}
 
 		char sDisplay[192];
 		FormatEx(sDisplay, 192, "[%s/%s] %s - %s @ %s", gS_StyleStrings[iStyle].sShortName, sTrack, sMap, sName, sTime);
@@ -3397,14 +3330,11 @@ public void SQL_PersonalBest_Callback(Database db, DBResultSet results, const ch
 			results.FetchString(5, name, sizeof(name));
 		}
 
-		char track_name[32];
-		GetTrackName(client, track, currentTrackInfo[track], track_name, sizeof(track_name));
-
 		char formated_time[32];
 		FormatSeconds(time, formated_time, sizeof(formated_time));
 
 		char display[256];
-		Format(display, sizeof(display), "%s - %s - %s", track_name, gS_StyleStrings[style].sStyleName, formated_time);
+		Format(display, sizeof(display), "%s - %s - %s", currentTrackInfo[track].trackName, gS_StyleStrings[style].sStyleName, formated_time);
 
 		char info[16];
 		IntToString(id, info, sizeof(info));
@@ -3488,7 +3418,7 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 	char sFormattedTitle[256];
 	char sName[MAX_NAME_LENGTH];
 	int iSteamID = 0;
-	char sTrack[32];
+	char sTrack[64];
 	char sMap[PLATFORM_MAX_PATH];
 
 	if(results.FetchRow())
@@ -3585,13 +3515,9 @@ public void SQL_SubMenu_Callback(Database db, DBResultSet results, const char[] 
 		}
 
 		if (stage == 0)
-		{
-			GetTrackName(client, results.FetchInt(11), currentTrackInfo[results.FetchInt(11)], sTrack, 32);
-		}
+			FormatEx(sTrack, sizeof(sTrack), "%s", currentTrackInfo[results.FetchInt(11)].trackName);
 		else
-		{
 			FormatEx(sTrack, sizeof(sTrack), "%T %d", "WRStage", client, stage);
-		}
 
 		Shavit_PrintSteamIDOnce(client, iSteamID, sName);
 	}
@@ -3773,21 +3699,25 @@ public void Shavit_OnDatabaseLoaded()
 	gH_SQL = Shavit_GetDatabase(gI_Driver);
 
 	gB_Connected = true;
-	RefreshTrackNames();
 	OnMapStart();
 }
 
-void RefreshTrackNames()
+public void Shavit_OnTrackNameUpdated(int track, const char[] old_name, int old_size, const char[] new_name, int new_size)
 {
-	Shavit_RefreshTracks();
-	for (int i; i < TRACKS_SIZE; i++)
-	{
-		if (!Shavit_IsStageValid(i))
-			continue;
-		
-		SQL_GetTrackInfo(i);
-	}
+	currentTrackInfo[track].setName(new_name);
+
+	if (StrContains(new_name, "Stage ") || StrContains(new_name, "Bonus ") || StrEqual(new_name, "Main Surf") || StrEqual(new_name, "Bonus Surf"))
+		currentTrackInfo[track].bTrackHasCustomName = false;
+	else
+		currentTrackInfo[track].bTrackHasCustomName = true;
 }
+
+public void Shavit_OnTrackNameRetrievedSQL(int track, const char[] track_name, int maxlength, bool& custom_name)
+{
+	currentTrackInfo[track].bTrackHasCustomName = custom_name;
+	currentTrackInfo[track].setName(track_name);
+}
+
 
 
 public void Shavit_OnFinishStage(int client, int track, int style, int stage, float time, float oldtime, int jumps, int strafes, float sync, float perfs, float avgvel, float maxvel, int timestamp)
@@ -3801,11 +3731,6 @@ public void Shavit_OnFinishStage(int client, int track, int style, int stage, fl
 	bool bIncrementCompletions = true;
 
 	int iSteamID = GetSteamAccountID(client);
-
-	char sTrack[32];
-	GetTrackName(LANG_SERVER, track, currentTrackInfo[track], sTrack, 32);
-
-	PrintToServer("User finished track: %i", sTrack);
 
 	if(Shavit_GetStyleSettingInt(style, "unranked") || Shavit_IsPracticeMode(client))
 	{
@@ -4127,9 +4052,6 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 	char sTime[32];
 	FormatSeconds(time, sTime, 32);
 
-	char sTrack[32];
-	GetTrackName(LANG_SERVER, track, currentTrackInfo[track], sTrack, 32);
-
 	// 0 - no query
 	// 1 - insert
 	// 2 - update
@@ -4165,10 +4087,15 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 	char sName[32+1];
 	GetClientName(client, sName, sizeof(sName));
 
+	int clientPayout;
+	bool beatWR = false;
+	bool beatPR = false;
+
 	if(iOverwrite > 0 && (time < gF_WRTime[style][track] || bServerFirstCompletion)) // WR?
 	{
-		CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}world {orchid}record!{default}\n[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iWorldRecord, sntdb_CurrencyColor, sntdb_CurrencyName);
-		SNT_AddCredits(client, Payouts.iWorldRecord);
+		beatWR = true;
+		CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}world {orchid}record!", sntdb_Prefix, Payouts.iWorldRecord, sntdb_CurrencyColor, sntdb_CurrencyName);
+		clientPayout += Payouts.iWorldRecord;
 
 		float fOldWR = gF_WRTime[style][track];
 		gF_WRTime[style][track] = time;
@@ -4264,27 +4191,29 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 				FormatEx(sMessage, 255, "%T",
 					"ServerFirstCompletion", LANG_SERVER, 
 					gS_ChatStrings.sVariable2, sName, 
-					gS_ChatStrings.sText, gS_ChatStrings.sVariable, sTrack, 
+					gS_ChatStrings.sText, gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, 
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTime, 
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable, iRank,
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable, 1,
 					gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
-					CPrintToChat(client, "%s {greenyellow}You finished the stage!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
-					SNT_AddCredits(client, Payouts.iRegularFinish);
+					if (!beatWR && !beatPR)
+						CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix);
+					clientPayout += Payouts.iRegularFinish;
 			}
 			else
 			{
 				FormatEx(sMessage, 255, "%T",
 					"PlayerFirstCompletion", LANG_SERVER, 
 					gS_ChatStrings.sVariable2, sName, 
-					gS_ChatStrings.sText, gS_ChatStrings.sVariable, sTrack, 
+					gS_ChatStrings.sText, gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, 
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTime, 
 					gS_ChatStrings.sText, sDifferenceWR,
 					gS_ChatStrings.sVariable, iRank,
 					gS_ChatStrings.sText, gS_ChatStrings.sVariable, iRankCount + 1,
 					gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
-					CPrintToChat(client, "%s {greenyellow}You finished the stage!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
-					SNT_AddCredits(client, Payouts.iRegularFinish);
+					if (!beatWR && !beatPR)
+						CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix);
+					clientPayout += Payouts.iRegularFinish;
 			}
 
 			FormatEx(sQuery, sizeof(sQuery),
@@ -4293,13 +4222,14 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 		}
 		else // Better than PB, Maybe Beat the wr
 		{
-			CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}personal {orchid}best!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iNewPersonalBest, sntdb_CurrencyColor, sntdb_CurrencyName);
-			SNT_AddCredits(client, Payouts.iNewPersonalBest);
+			CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}personal {orchid}best!", sntdb_Prefix, Payouts.iNewPersonalBest, sntdb_CurrencyColor, sntdb_CurrencyName);
+			beatPR = true;
+			clientPayout += Payouts.iNewPersonalBest;
 
 			FormatEx(sMessage, 255, "%T",
 				"NotFirstCompletion", LANG_SERVER, 
 				gS_ChatStrings.sVariable2, sName, 
-				gS_ChatStrings.sText, gS_ChatStrings.sVariable, sTrack, 
+				gS_ChatStrings.sText, gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, 
 				gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTime, 
 				gS_ChatStrings.sText, sDifferenceWR, sDifferencePB,
 				gS_ChatStrings.sVariable, iRank,
@@ -4349,12 +4279,13 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 
 		if(iOverwrite == 0 && !Shavit_GetStyleSettingInt(style, "unranked"))
 		{
-			CPrintToChat(client, "%s {greenyellow}You finished the stage!\n{default}[%i %s%s{default}] were added to yer coffers!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
-			SNT_AddCredits(client, Payouts.iRegularFinish);
+			if (!beatWR && !beatPR)
+				CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
+			clientPayout += Payouts.iRegularFinish;
 
 			FormatEx(sMessage, 255, "%T",
 				"WorseTime", client, 
-				gS_ChatStrings.sVariable, sTrack, 
+				gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, 
 				gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTime, 
 				gS_ChatStrings.sText, sDifferenceWR, sDifferencePB,
 				gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
@@ -4364,17 +4295,20 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 	{
 		FormatEx(sMessage, 255, "%T",
 			"UnrankedTime", client, 
-			gS_ChatStrings.sVariable, sTrack, 
+			gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, 
 			gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTime, 
 			gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
 	}
+
+	SNT_AddCredits(client, clientPayout);
+	CPrintToChat(client, "{greenyellow}[%s%i %s{greenyellow}] {default}were added to yer coffers!", sntdb_CurrencyColor, clientPayout, sntdb_CurrencyName);
 
 	timer_snapshot_t aSnapshot;
 	Shavit_SaveSnapshot(client, aSnapshot);
 
 	if (!Shavit_GetStyleSettingBool(style, "autobhop"))
 	{
-		FormatEx(sMessage2, sizeof(sMessage2), "%s[%s]%s %T", gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText, "CompletionExtraInfo", LANG_SERVER, gS_ChatStrings.sVariable, avgvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, maxvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, perfs, gS_ChatStrings.sText);
+		FormatEx(sMessage2, sizeof(sMessage2), "%s[%s]%s %T", gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText, "CompletionExtraInfo", LANG_SERVER, gS_ChatStrings.sVariable, avgvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, maxvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, perfs, gS_ChatStrings.sText);
 	}
 
 	Action aResult = Plugin_Continue;
@@ -4407,7 +4341,7 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 					FormatEx(sMessage, sizeof(sMessage), "%T",
 						"NotFirstCompletionWorse", i, 
 						gS_ChatStrings.sVariable2, sName, 
-						gS_ChatStrings.sText, gS_ChatStrings.sVariable, sTrack, 
+						gS_ChatStrings.sText, gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, 
 						gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTime, 
 						gS_ChatStrings.sText, sDifferenceWR, sDifferencePB,
 						gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);

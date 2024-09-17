@@ -32,12 +32,12 @@ enum
 	Zone_Start, 			// starts timer
 	Zone_End, 				// stops timer
 	Zone_Secret, 			// stops the player's timer and prints a secret message.
-	Zone_Stop,				// stops the player's timer
+	Zone_Jail,				// stops the player's timer
 	Zone_Cheater,
+	Zone_Stop,
 	Zone_Stage,
 	Zone_Checkpoint,
 	Zone_Slay,				// slays (kills) players which come to this zone
-	Zone_Freestyle,			// ignores style physics when at this zone. e.g. WASD when SWing
 	Zone_CustomSpeedLimit,	// overwrites velocity limit in the zone
 	Zone_Teleport,			// teleports to a defined point
 	Zone_CustomSpawn,		// spawn position for a track. not a physical zone.
@@ -127,12 +127,12 @@ stock void GetZoneName(int client, int zoneType, char[] output, int size)
 		"Zone_Start",
 		"Zone_End",
 		"Zone_Secret",
+		"Zone_Jail",
 		"Zone_Stop",
 		"Zone_Cheater",
 		"Zone_Stage",
 		"Zone_Checkpoint",
 		"Zone_Slay",
-		"Zone_Freestyle",
 		"Zone_CustomSpeedLimit",
 		"Zone_Teleport",
 		"Zone_CustomSpawn",

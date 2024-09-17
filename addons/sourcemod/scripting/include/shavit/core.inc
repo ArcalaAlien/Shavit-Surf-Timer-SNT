@@ -135,6 +135,8 @@ enum struct timer_snapshot_t
 	float fServerTime;
 	int iKeyCombo;
 	int iTimerTrack;
+	int iHighestTrack;
+	int iHighestBonus;
 	int iLastStage;
 	int iMeasuredJumps;
 	int iPerfectJumps;
@@ -177,8 +179,13 @@ enum struct timer_snapshot_t
 enum struct track_info
 {
 	bool bTrackHasCustomName;
-	char trackName[32];
-}
+	char trackName[64];
+	
+	void setName(const char[] name)
+	{
+		FormatEx(this.trackName, sizeof(this.trackName), name);
+	}
+} 
 
 stock void Shavit_LogQuery(const char[] query)
 {
@@ -239,7 +246,8 @@ stock Database GetTimerDatabaseHandle(bool reuse_persistent_connection=true)
 	{
 		if((db = SQL_Connect("shavit", reuse_persistent_connection, sError, 255)) == null)
 		{
-			SetFailState("Timer startup failed. Reason: %s", sError);
+			PrintToServer("Timer startup failed. Reason %s", sError);
+			LogError("Timer startup failed. Reason: %s", sError);
 		}
 	}
 	else
@@ -475,28 +483,6 @@ stock bool GuessBestMapName(ArrayList maps, const char input[PLATFORM_MAX_PATH],
 	}
 
 	return false;
-}
-
-stock void GetTrackName(int client, int track, track_info info, char[] output, int size, bool include_bonus_num=true)
-{
-	if (info.bTrackHasCustomName)
-	{
-		FormatEx(output, size, "%s", info.trackName);
-		return;
-	}
-
-	if (track == 0)
-		FormatEx(output, size, "%T", "Track_Main", client)
-	else if (track <= Track_Stage_Last)
-		FormatEx(output, size, "%T", "Track_Stage", client, track);
-	else if (track == (Track_Stage_Last + 1))
-		FormatEx(output, size, "%T", "Track_Bonus_NoNum", client);
-	else if (track == 22)
-		FormatEx(output, size, "%T", "Track_Bonus", client, (track - 21));
-	else if ((track >= (Track_Bonus + 1)) && (track < TRACKS_SIZE))
-		FormatEx(output, size, "%T", "Track_Bonus", client, (track - 21));
-	else
-		FormatEx(output, size, "%T", "Track_Unknown", client);
 }
 
 stock int GetSpectatorTarget(int client, int fallback = -1)
@@ -969,7 +955,19 @@ forward Action Shavit_OnTimerMenuSelect(int client, int position, char[] info, i
  * 
  * @noreturn
  */
-forward void Shavit_OnTrackNameUpdated(int track, char[] old_name, int old_size, char[] new_name, int new_size)
+forward void Shavit_OnTrackNameUpdated(int track, const char[] old_name, int old_size, const char[] new_name, int new_size)
+
+/**
+ *  Called when the SQL to fetch a track name has been retrieved. ** THIS SHOULD GUARANTEE A TRACK NAME HAS BEEN LOADED (hopefully) **
+ * 
+ *  @param track					The index of the track that had its name fetched
+ *  @param track_name				char buffer to store the name
+ *  @param maxlength				size of the char buffer
+ *  @param custom_name				whether the track has a custom name or not.
+ * 
+ *  @noreturn
+ */
+forward void Shavit_OnTrackNameRetrievedSQL(int track, const char[] track_name, int maxlength, bool& custom_name);
 
 /**
  * Returns bhoptimer's database handle.
@@ -1079,6 +1077,22 @@ native float Shavit_GetClientStageTime(int client);
  * @return                          Timer track.
  */
 native int Shavit_GetClientTrack(int client);
+
+/**
+ *  Retrieve the client's highest track they reached.
+ * 
+ * @param client					Client index
+ * @return							Highest track reached.
+ */
+native int Shavit_GetClientHighestTrack(int client);
+
+/**
+ *  Retrieve the client's highest bonus they reached.
+ * 
+ *  @param client					Client index
+ *  @return							Highest bonus track
+ */
+native int Shavit_GetClientHighestBonus(int client);
 
 /**
  * Retrieve the client's current stage number.
@@ -1665,6 +1679,18 @@ native void Shavit_SetClientRepeat(int client, bool repeat);
  *  @noreturn
  */
 native void Shavit_GetTrackInfo(int track, any[] info, int size);
+
+/**
+ *  Gets the track name from the core plugin for use in other modules.
+ * 
+ *  @param client				client index to use for translation strings.
+ *  @param track				The track to get the name for.
+ *  @param buffer				The char buffer to store the track name.
+ *  @param maxlength			The length of the buffer
+ * 
+ *  @return						true if track has a custom name, false if not.
+ */
+native bool Shavit_GetCustomTrackName(int client, int track, const char[] buffer, int maxlength)
 
 /**
  *  Fetches the SQL prefix from the core plugin.

@@ -11,6 +11,11 @@
 		"#format"	"{1:d}"
 		"en"		"Tier {1}"
 	}
+	"HudCurrentTrack"
+	{
+		"#format"	"{1:s}"
+		"en"		"{1}"
+	}
 	"HudInStartZone"
 	{
 		"#format"	"{1:s}"

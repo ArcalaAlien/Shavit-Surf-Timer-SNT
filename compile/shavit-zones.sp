@@ -32,6 +32,8 @@
 #include <shavit/hud>
 #include <shavit/physicsuntouch>
 
+#include <stocksoup/tf/econ>
+
 #undef REQUIRE_PLUGIN
 #include <adminmenu>
 #include <shavit/replay-recorder>
@@ -51,6 +53,10 @@
 #define FSOLID_TRIGGER 8
 #define EF_NODRAW 32
 #define SOLID_BBOX 2
+#define TF_ROCKETJUMPER 237
+#define TF_STICKYJUMPER 265
+
+#define TRACK_NAME currentTrackInfo[track].trackName
 
 EngineVersion gEV_Type = Engine_Unknown;
 
@@ -1115,13 +1121,13 @@ bool JumpToZoneType(KeyValues kv, int type, int track)
 	static const char config_keys[ZONETYPES_SIZE][2][50] = {
 		{"Start", ""},
 		{"End", ""},
-		{"Stage", ""},		
+		{"Secret", ""},
+		{"Jail", ""},
+		{"Stop", ""},
 		{"Cheater", "Cheater Zone"},
+		{"Stage", ""},
 		{"Checkpoint", ""},
-		{"Glitch_Respawn", "Glitch Respawn"},
-		{"Glitch_Stop", "Glitch Stop"},
 		{"Glitch_Slay", "Glitch Slay"},
-		{"Freestyle", ""},
 		{"Custom Speed Limit", "Nolimit"},
 		{"Teleport", ""},
 		{"SPAWN POINT", ""},
@@ -1305,7 +1311,6 @@ public void OnMapStart()
 	GetLowercaseMapName(gS_Map);
 	LoadZoneSettings();
 	//UnloadZones();
-	RefreshTrackNames();
 
 
 	if (gEV_Type == Engine_TF2)
@@ -1801,55 +1806,20 @@ void RefreshZones()
 	QueryLog(gH_SQL, SQL_RefreshZones_Callback, sQuery, 0, DBPrio_High);
 }
 
-void SQL_GetTrackInfo(int track)
+public void Shavit_OnTrackNameUpdated(int track, const char[] old_name, int old_size, const 	char[] new_name, int new_size)
 {
-	char currentMap[64];
-	GetCurrentMap(currentMap, sizeof(currentMap));
-	
-	char sQuery[512];
-	FormatEx(sQuery, sizeof(sQuery), "SELECT track_name " 
-								  ..."FROM %smapzones "
-								  ..."WHERE (map=\"%s\" AND track=\"%i\");",
-									 gS_MySQLPrefix, currentMap, track);
+	currentTrackInfo[track].setName(new_name);
 
-	SQL_TQuery(gH_SQL, SQL_GetTrackInfo_Callback, sQuery, track);
+	if (StrContains(new_name, "Stage ") || StrContains(new_name, "Bonus ") || StrEqual(new_name, "Main Surf") || StrEqual(new_name, "Bonus Surf"))
+		currentTrackInfo[track].bTrackHasCustomName = false;
+	else
+		currentTrackInfo[track].bTrackHasCustomName = true;
 }
 
-public void SQL_GetTrackInfo_Callback(Database db, DBResultSet results, const char[] error, any track)
+public void Shavit_OnTrackNameRetrievedSQL(int track, const char[] track_name, int maxlength, bool& custom_name)
 {
-	if (results == null)
-	{
-		LogError("[SQL_GetTrackInfo_Callback] Unable to get track info from database (Reason: %s)", error);
-		return;
-	}
-
-	while (SQL_FetchRow(results))
-	{
-		char sResult[64];
-		SQL_FetchString(results, 0, sResult, sizeof(sResult));
-		if (!StrEqual(sResult, "HANDLED_BY_PLUGIN"))
-		{
-			currentTrackInfo[track].bTrackHasCustomName = true;
-			Format(currentTrackInfo[track].trackName, sizeof(currentTrackInfo.trackName), "%s", sResult);
-		}
-	}	
-}
-
-void RefreshTrackNames()
-{
-	Shavit_RefreshTracks();
-	for (int i; i < TRACKS_SIZE; i++)
-	{
-		if (!Shavit_IsStageValid(i))
-			continue;
-		
-		SQL_GetTrackInfo(i);
-	}
-}
-
-public void Shavit_OnTrackNameUpdated(int track, char[] old_name, int old_size, char[] new_name, int new_size)
-{
-	SQL_GetTrackInfo(track);
+	currentTrackInfo[track].bTrackHasCustomName = custom_name;
+	currentTrackInfo[track].setName(track_name);
 }
 
 public void SQL_RefreshZones_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -2125,10 +2095,10 @@ public Action Command_SetStart(int client, int args)
 	int track = Shavit_GetClientTrack(client);
 	int stage = Shavit_IsOnlyStageMode(client) ? Shavit_GetClientLastStage(client) : 1;
 
-	char sTrack[32];
+	char sTrack[64];
 	if(stage == 1)
 	{
-		GetTrackName(client, track, currentTrackInfo[track], sTrack, sizeof(sTrack));
+		FormatEx(sTrack, sizeof(sTrack), "%s", TRACK_NAME);
 	}
 	else
 	{
@@ -2195,10 +2165,9 @@ public Action Command_DeleteSetStart(int client, int args)
 	{
 		if (gB_HasSetStart[client][i][1])
 		{
-			char info[8], sTrack[32];
+			char info[8], sTrack[64];
 			IntToString(i, info, sizeof(info));
-			GetTrackName(client, i, currentTrackInfo[i], sTrack, sizeof(sTrack));
-			menu.AddItem(info, sTrack);
+			menu.AddItem(info, currentTrackInfo[i].trackName);
 		}
 	}
 
@@ -2233,7 +2202,7 @@ public int MenuHandler_DeleteSetStart(Menu menu, MenuAction action, int param1, 
 		int stage = 1;
 
 		menu.GetItem(param2, info, sizeof(info));
-		char sTrack[32];
+		char sTrack[64];
 
 		if(StrContains(info, "s", false) == 0)
 		{
@@ -2242,12 +2211,9 @@ public int MenuHandler_DeleteSetStart(Menu menu, MenuAction action, int param1, 
 			FormatEx(sTrack, sizeof(sTrack), "%T %d", "StageText", param1, stage);
 		}
 		else
-		{
 			track = StringToInt(info);
-			GetTrackName(param1, track, currentTrackInfo[track], sTrack, sizeof(sTrack));
-		}
 		
-		Shavit_PrintToChat(param1, "%T", "DeleteSetStart", param1, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
+		Shavit_PrintToChat(param1, "%T", "DeleteSetStart", param1, gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
 		
 		DeleteSetStart(param1, track, stage);
 	}
@@ -2373,10 +2339,7 @@ Action DisplayCustomSpawnMenu(int client)
 		char sInfo[8];
 		IntToString(i, sInfo, 8);
 
-		char sTrack[32];
-		GetTrackName(client, i, currentTrackInfo[i], sTrack, 32);
-
-		menu.AddItem(sInfo, sTrack);
+		menu.AddItem(sInfo, currentTrackInfo[i].trackName);
 	}
 
 	menu.ExitButton = true;
@@ -2402,10 +2365,7 @@ public int MenuHandler_AddCustomSpawn(Menu menu, MenuAction action, int param1, 
 
 		if(!EmptyVector(gF_CustomSpawn[iTrack]))
 		{
-			char sTrack[32];
-			GetTrackName(param1, iTrack, currentTrackInfo[iTrack], sTrack, 32);
-
-			Shavit_PrintToChat(param1, "%T", "ZoneCustomSpawnExists", param1, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);
+			Shavit_PrintToChat(param1, "%T", "ZoneCustomSpawnExists", param1, gS_ChatStrings.sVariable, currentTrackInfo[iTrack].trackName, gS_ChatStrings.sText);
 
 			return 0;
 		}
@@ -2476,10 +2436,7 @@ Action DisplayCustomSpawnDeleteMenu(int client)
 		char sInfo[8];
 		IntToString(i, sInfo, 8);
 
-		char sTrack[32];
-		GetTrackName(client, i, currentTrackInfo[i], sTrack, 32);
-
-		menu.AddItem(sInfo, sTrack, (EmptyVector(gF_CustomSpawn[i]))? ITEMDRAW_DISABLED:ITEMDRAW_DEFAULT);
+		menu.AddItem(sInfo, currentTrackInfo[i].trackName, (EmptyVector(gF_CustomSpawn[i]))? ITEMDRAW_DISABLED:ITEMDRAW_DEFAULT);
 	}
 
 	menu.ExitButton = true;
@@ -2498,11 +2455,7 @@ public int MenuHandler_DeleteCustomSpawn(Menu menu, MenuAction action, int param
 
 		if(EmptyVector(gF_CustomSpawn[iTrack]))
 		{
-			char sTrack[32];
-			GetTrackName(param1, iTrack, currentTrackInfo[iTrack], sTrack, 32);
-
-			Shavit_PrintToChat(param1, "%T", "ZoneCustomSpawnMissing", param1, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText);
-
+			Shavit_PrintToChat(param1, "%T", "ZoneCustomSpawnMissing", param1, gS_ChatStrings.sVariable, currentTrackInfo[iTrack].trackName, gS_ChatStrings.sText);
 			return 0;
 		}
 
@@ -2706,22 +2659,19 @@ public Action Command_Stages(int client, int args)
 		return Plugin_Handled;
 	}
 
-	//int iStage = -1;
+	int iStage = -1;
 
-	//int iLastStage = Shavit_GetClientLastStage(client);
+	int iLastStage = Shavit_GetClientLastStage(client);
 
 	Menu menu = new Menu(MenuHandler_SelectStage);
 	menu.SetTitle("%T", "ZoneMenuStage", client);
 
 	char sDisplay[64];
-	char sTrack[32];
-
 	for(int i = 0; i < gI_MapZones; i++)
 	{
 		if (gA_ZoneCache[i].iType == Zone_Stage)
 		{
-			GetTrackName(client, gA_ZoneCache[i].iTrack, currentTrackInfo[gA_ZoneCache[i].iTrack], sTrack, 32);
-			FormatEx(sDisplay, 64, "#%d - %T (%s)", (i + 1), "ZoneSetStage", client, gA_ZoneCache[i].iData, sTrack);
+			FormatEx(sDisplay, 64, "#%d - %T (%s)", (i + 1), "ZoneSetStage", client, gA_ZoneCache[i].iData, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName);
 
 			char sInfo[8];
 			IntToString(i, sInfo, 8);
@@ -2730,8 +2680,7 @@ public Action Command_Stages(int client, int args)
 		}
 		else if (gA_ZoneCache[i].iType == Zone_Start && gA_ZoneCache[i].iTrack == Track_Main)
 		{
-			GetTrackName(client, gA_ZoneCache[i].iTrack, currentTrackInfo[gA_ZoneCache[i].iTrack], sTrack, 32);
-			FormatEx(sDisplay, 64, "#%d - %T (%s)", (i + 1), "ZoneSetStage", client, 1, sTrack);
+			FormatEx(sDisplay, 64, "#%d - %T (%s)", (i + 1), "ZoneSetStage", client, 1, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName);
 
 			char sInfo[8];
 			IntToString(i, sInfo, 8);
@@ -2813,11 +2762,7 @@ public Action Command_Zones(int client, int args)
 	{
 		char sInfo[8];
 		IntToString(i, sInfo, 8);
-
-		char sDisplay[32];
-		GetTrackName(client, i, currentTrackInfo[i], sDisplay, 32);
-
-		menu.AddItem(sInfo, sDisplay);
+		menu.AddItem(sInfo, currentTrackInfo[i].trackName);
 	}
 
 	menu.ExitBackButton = true;
@@ -2834,11 +2779,8 @@ public int MenuHandler_SelectZoneTrack(Menu menu, MenuAction action, int param1,
 		menu.GetItem(param2, sInfo, 8);
 		gA_EditCache[param1].iTrack = StringToInt(sInfo);
 
-		char sTrack[32];
-		GetTrackName(param1, gA_EditCache[param1].iTrack, currentTrackInfo[gA_EditCache[param1].iTrack], sTrack, 16);
-
 		Menu submenu = new Menu(MenuHandler_SelectZoneType);
-		submenu.SetTitle("%T\n ", "ZoneMenuTitle", param1, sTrack);
+		submenu.SetTitle("%T\n ", "ZoneMenuTitle", param1, currentTrackInfo[gA_EditCache[param1].iTrack].trackName);
 
 		char sZoneName[32];
 
@@ -2901,23 +2843,20 @@ Action OpenTpToZoneMenu(int client, int pagepos=0)
 			}
 		}
 
-		char sTrack[32];
-		GetTrackName(client, gA_ZoneCache[i].iTrack, currentTrackInfo[gA_ZoneCache[i].iTrack], sTrack, 32);
-
 		char sZoneName[32];
 		GetZoneName(client, gA_ZoneCache[i].iType, sZoneName, sizeof(sZoneName));
 
 		if (gA_ZoneCache[i].iType == Zone_CustomSpeedLimit || gA_ZoneCache[i].iType == Zone_Stage || gA_ZoneCache[i].iType == Zone_Checkpoint || gA_ZoneCache[i].iType == Zone_Airaccelerate)
 		{
-			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s %d (%s)%s", (i + 1), sZoneName, gA_ZoneCache[i].iData, sTrack, sTarget);
+			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s %d (%s)%s", (i + 1), sZoneName, gA_ZoneCache[i].iData, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName, sTarget);
 		}
 		else if (gA_ZoneCache[i].iType == Zone_Gravity || gA_ZoneCache[i].iType == Zone_Speedmod)
 		{
-			FormatEx(sDisplay, 64, "#%d - %s %.2f (%s)", (i + 1), sZoneName, gA_ZoneCache[i].iData, sTrack);
+			FormatEx(sDisplay, 64, "#%d - %s %.2f (%s)", (i + 1), sZoneName, gA_ZoneCache[i].iData, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName);
 		}
 		else
 		{
-			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s (%s)%s", (i + 1), sZoneName, sTrack, sTarget);
+			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s (%s)%s", (i + 1), sZoneName, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName, sTarget);
 		}
 
 		if (gB_InsideZoneID[client][i])
@@ -3010,9 +2949,11 @@ public int MenuHandler_HookZone_Editor(Menu menu, MenuAction action, int param1,
 				| (1 << Zone_End)
 				| (1 << Zone_Secret)
 				| (1 << Zone_Stop)
+				| (1 << Zone_Jail)
 				| (1 << Zone_Cheater)
+				| (1 << Zone_Stage)
+				| (1 << Zone_Checkpoint)
 				| (1 << Zone_Slay)
-				| (1 << Zone_Freestyle)
 				| (1 << Zone_CustomSpeedLimit)
 				| (1 << Zone_Teleport)
 				| (1 << Zone_Easybhop)
@@ -3021,17 +2962,18 @@ public int MenuHandler_HookZone_Editor(Menu menu, MenuAction action, int param1,
 				| (1 << Zone_NoTimerGravity)
 				| (1 << Zone_Gravity)
 				// ZoneForm_trigger_teleport
-				, (1 << Zone_End)
-				| (1 << Zone_Secret)
+				, (1 << Zone_Start)
+				| (1 << Zone_End)
 				| (1 << Zone_Stop)
+				| (1 << Zone_Secret)
+				| (1 << Zone_Jail)
+				| (1 << Zone_Cheater)
 				| (1 << Zone_Slay)
-				| (1 << Zone_Freestyle)
 				| (1 << Zone_CustomSpeedLimit)
 				| (1 << Zone_NoTimerGravity)
 				// ZoneForm_func_button
 				, (1 << Zone_Start)
 				| (1 << Zone_End)
-				| (1 << Zone_Stop)
 				| (1 << Zone_Slay)
 			};
 
@@ -3134,10 +3076,6 @@ void OpenHookMenu_Editor(int client)
 	FormatEx(display, sizeof(display), "%T\n ", "ZoneHook_Tpto", client);
 	menu.AddItem("tpto", display);//, form == ZoneForm_trigger_teleport ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT);
 
-	if (track != -1 || track > TRACKS_SIZE)
-		GetTrackName(client, track, currentTrackInfo[track], buf, sizeof(buf), true);
-	else
-		FormatEx(buf, sizeof(buf), "%T", "Track_Unknown", client);
 	FormatEx(display, sizeof(display), "%T", "ZoneEditTrack", client, buf);
 	menu.AddItem("track", display);
 	GetZoneName(client, zonetype, buf, sizeof(buf));
@@ -3452,23 +3390,20 @@ Action OpenEditMenu(int client, int pos = 0)
 			}
 		}
 
-		char sTrack[32];
-		GetTrackName(client, gA_ZoneCache[i].iTrack, currentTrackInfo[gA_ZoneCache[i].iTrack], sTrack, 32);
-
 		char sZoneName[32];
 		GetZoneName(client, gA_ZoneCache[i].iType, sZoneName, sizeof(sZoneName));
 
 		if (gA_ZoneCache[i].iType == Zone_CustomSpeedLimit || gA_ZoneCache[i].iType == Zone_Stage || gA_ZoneCache[i].iType == Zone_Airaccelerate || gA_ZoneCache[i].iType == Zone_Checkpoint)
 		{
-			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s %d (%s)%s", (i + 1), sZoneName, gA_ZoneCache[i].iData, sTrack, sTarget);
+			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s %d (%s)%s", (i + 1), sZoneName, gA_ZoneCache[i].iData, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName, sTarget);
 		}
 		else if (gA_ZoneCache[i].iType == Zone_Gravity || gA_ZoneCache[i].iType == Zone_Speedmod)
 		{
-			FormatEx(sDisplay, 64, "#%d - %s %.2f (%s)", (i + 1), sZoneName, gA_ZoneCache[i].iData, sTrack);
+			FormatEx(sDisplay, 64, "#%d - %s %.2f (%s)", (i + 1), sZoneName, gA_ZoneCache[i].iData, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName);
 		}
 		else
 		{
-			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s (%s)%s", (i + 1), sZoneName, sTrack, sTarget);
+			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s (%s)%s", (i + 1), sZoneName, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName, sTarget);
 		}
 
 		if(gB_InsideZoneID[client][i])
@@ -3563,10 +3498,9 @@ void OpenCustomZoneMenu(int client, int pos=0)
 				char info[8];
 				FormatEx(info, sizeof(info), "%i;%i", i, j);
 				char trackName[32], zoneName[32], display[64];
-				GetTrackName(client, i, currentTrackInfo[i], trackName, sizeof(trackName), !(CZONE_VER == 'b'));
 				GetZoneName(client, j, zoneName, sizeof(zoneName));
 
-				FormatEx(display, sizeof(display), "%s - %s", trackName, zoneName);
+				FormatEx(display, sizeof(display), "%s - %s", currentTrackInfo[i].trackName, zoneName);
 				menu.AddItem(info, display);
 			}
 		}
@@ -3603,11 +3537,10 @@ void OpenSubCustomZoneMenu(int client, int track, int zoneType)
 {
 	Menu menu = new Menu(MenuHandler_SubCustomZones);
 
-	char trackName[32], zoneName[32];
-	GetTrackName(client, track, currentTrackInfo[track], trackName, sizeof(trackName));
+	char zoneName[32];
 	GetZoneName(client, zoneType, zoneName, sizeof(zoneName));
 
-	menu.SetTitle("%T", "CustomZone_SubMenuTitle", client, trackName, zoneName);
+	menu.SetTitle("%T", "CustomZone_SubMenuTitle", client, currentTrackInfo[track].trackName, zoneName);
 
 	char info[16], display[64];
 
@@ -3800,24 +3733,21 @@ Action OpenDeleteMenu(int client, int pos = 0)
 				FormatEx(sTarget, sizeof(sTarget), " (%s)", MaybeOriginHexToFloatString(gA_ZoneCache[i]));
 			}
 		}
-
-		char sTrack[32];
-		GetTrackName(client, gA_ZoneCache[i].iTrack, currentTrackInfo[gA_ZoneCache[i].iTrack], sTrack, 32);
-
+	
 		char sZoneName[32];
 		GetZoneName(client, gA_ZoneCache[i].iType, sZoneName, sizeof(sZoneName));
 
 		if(gA_ZoneCache[i].iType == Zone_CustomSpeedLimit || gA_ZoneCache[i].iType == Zone_Stage || gA_ZoneCache[i].iType == Zone_Checkpoint || gA_ZoneCache[i].iType == Zone_Airaccelerate)
 		{
-			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s %d (%s)%s", (i + 1), sZoneName, gA_ZoneCache[i].iData, sTrack, sTarget);
+			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s %d (%s)%s", (i + 1), sZoneName, gA_ZoneCache[i].iData, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName, sTarget);
 		}
 		else if (gA_ZoneCache[i].iType == Zone_Gravity || gA_ZoneCache[i].iType == Zone_Speedmod)
 		{
-			FormatEx(sDisplay, 64, "#%d - %s %.2f (%s)", (i + 1), sZoneName, gA_ZoneCache[i].iData, sTrack);
+			FormatEx(sDisplay, 64, "#%d - %s %.2f (%s)", (i + 1), sZoneName, gA_ZoneCache[i].iData, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName);
 		}
 		else
 		{
-			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s (%s)%s", (i + 1), sZoneName, sTrack, sTarget);
+			FormatEx(sDisplay, sizeof(sDisplay), "#%d - %s (%s)%s", (i + 1), sZoneName, currentTrackInfo[gA_ZoneCache[i].iTrack].trackName, sTarget);
 		}
 
 		char sInfo[8];
@@ -3896,7 +3826,7 @@ public void CallOnZoneDeleted(int type, int track, int data, bool all)
 {
 	if(!all)
 	{
-		char sTrack[32];
+		char sTrack[64];
 		char sZoneName[32];
 		if (type == Zone_Start || type == Zone_End)
 		{
@@ -3905,8 +3835,7 @@ public void CallOnZoneDeleted(int type, int track, int data, bool all)
 				if(IsValidClient(i) && Shavit_GetClientTrack(i) == track)
 				{
 					GetZoneName(i, type, sZoneName, 32);
-					GetTrackName(i, track, currentTrackInfo[track], sTrack, 32);
-					Shavit_PrintToChat(i, "%T", "ZoneDeletedStopTimer", i, gS_ChatStrings.sVariable, sTrack, gS_ChatStrings.sText, sZoneName);
+					Shavit_PrintToChat(i, "%T", "ZoneDeletedStopTimer", i, gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText, sZoneName);
 
 					Shavit_StopTimer(i, false);
 				}
@@ -4082,10 +4011,7 @@ public int MenuHandler_SelectZoneType(Menu menu, MenuAction action, int param1, 
 		char sZoneName[32];
 		GetZoneName(param1, gA_EditCache[param1].iType, sZoneName, 32);
 
-		char sDisplay[16];
-		GetTrackName(param1, gA_EditCache[param1].iTrack, currentTrackInfo[gA_EditCache[param1].iTrack], sDisplay, 16);
-
-		Shavit_PrintToChat(param1, "%T", "ZoneCreateType", param1, gS_ChatStrings.sVariable, sZoneName, gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sDisplay);
+		Shavit_PrintToChat(param1, "%T", "ZoneCreateType", param1, gS_ChatStrings.sVariable, sZoneName, gS_ChatStrings.sText, gS_ChatStrings.sVariable2, currentTrackInfo[gA_EditCache[param1].iTrack].trackName);
 
 		if (gA_EditCache[param1].iType == Zone_Gravity || gA_EditCache[param1].iType == Zone_Speedmod)
 		{
@@ -4657,8 +4583,7 @@ void CreateEditMenu(int client, bool autostage=false)
 {
 	bool hookmenu = gI_HookListPos[client] != -1;
 
-	char sTrack[32], sType[32];
-	GetTrackName(client, gA_EditCache[client].iTrack, currentTrackInfo[gA_EditCache[client].iTrack], sTrack, 32);
+	char sType[32];
 	GetZoneName(client, gA_EditCache[client].iType, sType, sizeof(sType));
 
 	Menu menu = new Menu(CreateZoneConfirm_Handler);
@@ -4667,7 +4592,7 @@ void CreateEditMenu(int client, bool autostage=false)
 	{
 		menu.SetTitle("%T\n%T\n%T\n%T\n ",
 			"ZoneEditConfirm", client,
-			"ZoneEditTrack", client, sTrack,
+			"ZoneEditTrack", client, currentTrackInfo[gA_EditCache[client].iTrack].trackName,
 			"ZoneHook_Zonetype", client, sType,
 			"ZoneHook_Hooktype", client,
 			(gA_EditCache[client].iFlags & ZF_Hammerid) ? "hammerid" :
@@ -4679,7 +4604,7 @@ void CreateEditMenu(int client, bool autostage=false)
 	{
 		menu.SetTitle("%T\n%T\n%T\n ",
 			"ZoneEditConfirm", client,
-			"ZoneEditTrack", client, sTrack,
+			"ZoneEditTrack", client, currentTrackInfo[gA_EditCache[client].iTrack].trackName,
 			"ZoneHook_Zonetype", client, sType);
 	}
 
@@ -4914,8 +4839,7 @@ void InsertZone(int client)
 	c.sSource = "sql";
 
 	char sQuery[1024];
-	char sTrack[32], sZoneName[32];
-	GetTrackName(LANG_SERVER, c.iTrack, currentTrackInfo[c.iTrack], sTrack, sizeof(sTrack));
+	char sZoneName[32];
 	GetZoneName(LANG_SERVER, c.iType, sZoneName, sizeof(sZoneName));
 
 	// normalize zone points...
@@ -4929,7 +4853,7 @@ void InsertZone(int client)
 			"%L - added %s %s to map `%s`. \
 			p1(%f, %f, %f), p2(%f, %f, %f), dest(%f, %f, %f), \
 			flags=%d, data=%d, speedlimit=%d, form=%d, target='%s'",
-			client, sTrack, sZoneName, gS_Map,
+			client, currentTrackInfo[c.iTrack].trackName, sZoneName, gS_Map,
 			EXPAND_VECTOR(c.fCorner1),
 			EXPAND_VECTOR(c.fCorner2),
 			EXPAND_VECTOR(c.fDestination),
@@ -4950,7 +4874,7 @@ void InsertZone(int client)
 			%d, %d, %d, \
 			%d, %d, '%s');",
 			gS_MySQLPrefix,
-			gS_Map, c.iType, sTrack,
+			gS_Map, c.iType, currentTrackInfo[c.iTrack].trackName,
 			EXPAND_VECTOR(c.fCorner1),
 			EXPAND_VECTOR(c.fCorner2),
 			EXPAND_VECTOR(c.fDestination),
@@ -4965,7 +4889,7 @@ void InsertZone(int client)
 			"%L - updated %s %s (%d) in map `%s`. \
 			p1(%f, %f, %f), p2(%f, %f, %f), dest(%f, %f, %f), \
 			flags=%d, data=%d, speedlimit=%d, form=%d, target='%s'",
-			client, sTrack, sZoneName, c.iDatabaseID, gS_Map,
+			client, currentTrackInfo[c.iTrack].trackName, sZoneName, c.iDatabaseID, gS_Map,
 			EXPAND_VECTOR(c.fCorner1),
 			EXPAND_VECTOR(c.fCorner2),
 			EXPAND_VECTOR(c.fDestination),
@@ -5382,7 +5306,6 @@ void CreateZonePoints(float point[8][3], bool prebuilt)
 
 public void Shavit_OnDatabaseLoaded()
 {
-	RefreshTrackNames();
 	GetTimerSQLPrefix(gS_MySQLPrefix, 32);
 	gH_SQL = Shavit_GetDatabase(gI_Driver);
 
@@ -5428,7 +5351,6 @@ void ResetClientTargetNameAndClassName(int client, int track)
 
 public Action Shavit_OnStart(int client, int track)
 {
-	SQL_GetTrackInfo(track);
 	if(gCV_ForceTargetnameReset.BoolValue)
 	{
 		ResetClientTargetNameAndClassName(client, track);
@@ -5839,17 +5761,58 @@ public void StartTouchPost(int entity, int other)
 			}
 		}
 
-		case Zone_Stop:
+		case Zone_Jail:
 		{
 			if(status != Timer_Stopped && !bReplay)
 			{
 				Shavit_StopTimer(other);
-				Shavit_PrintToChat(other, "%T", "ZoneStopEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, gS_ChatStrings.sWarning);
+				Shavit_PrintToChat(other, "%T", "ZoneJailEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2);
+			}
+		}
+
+		case Zone_Stop:
+		{
+			if (status != Timer_Stopped && !bReplay)
+			{
+				Shavit_StopTimer(other);
+				Shavit_PrintToChat(other, "%T", "ZoneStopEnter", other, gS_ChatStrings.sWarning);
+			}
+		}
+
+		case Zone_Start:
+		{
+			int primaryWep = GetPlayerWeaponSlot(other, 0);
+			int secondaryWep = GetPlayerWeaponSlot(other, 1);
+
+			if ((primaryWep != -1) && (secondaryWep != -1))
+			{
+				int primaryWepIndex = TF2_GetItemDefinitionIndexSafe(primaryWep);
+				int secondaryWepIndex = TF2_GetItemDefinitionIndexSafe(secondaryWep);
+				
+				if (primaryWepIndex == TF_ROCKETJUMPER)
+					Shavit_PrintToChat(other, "%sYour time will not count on this track while you use the rocket jumper!", gS_ChatStrings.sWarning);
+				
+				if (secondaryWepIndex == TF_STICKYJUMPER)
+					Shavit_PrintToChat(other, "%sYour time will not count on this track while you use the sticky jumper!", gS_ChatStrings.sWarning);
 			}
 		}
 
 		case Zone_End:
 		{
+			int primaryWep = GetPlayerWeaponSlot(other, 0);
+			int secondaryWep = GetPlayerWeaponSlot(other, 1);
+			if (primaryWep != -1 && secondaryWep != -1)
+			{
+				int primaryWepIndex = TF2_GetItemDefinitionIndexSafe(primaryWep);
+				int secondaryWepIndex = TF2_GetItemDefinitionIndexSafe(secondaryWep);
+
+				if ((primaryWepIndex == TF_ROCKETJUMPER) || (secondaryWepIndex == TF_STICKYJUMPER))
+				{
+					Shavit_StopTimer(other);
+					return;
+				}
+			}
+
 			if (!bReplay && status == Timer_Running && Shavit_GetClientTrack(other) == track)
 			{
 				Shavit_FinishMap(other, track);
@@ -5990,18 +5953,16 @@ public void EndTouchPost(int entity, int other)
 				float fSpeed[3];
 				GetEntPropVector(other, Prop_Data, "m_vecVelocity", fSpeed);
 				float curVel = SquareRoot(Pow(fSpeed[0], 2.0) + Pow(fSpeed[1], 2.0));
-				//float speed = GetVectorLength(fSpeed);
+				float speed = GetVectorLength(fSpeed);
 
 				bool valid = true;
 				Shavit_SetStageTimeValid(other, valid);
 
 				if ((Shavit_GetHUDSettings(other) & HUD_SPEEDTRAP > 0) && curVel >= 15.0 && Shavit_GetClientTime(other) < 1.0)
 				{
-					char sDisplay[32];
-					GetTrackName(other, track, currentTrackInfo[track], sDisplay, 16);
 					Shavit_StopChatSound();
 					Shavit_PrintToChat(other, "You started [%s%s%s]", 
-					gS_ChatStrings.sVariable, sDisplay, gS_ChatStrings.sText);
+					gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText);
 				}
 			}
 		}
@@ -6112,31 +6073,33 @@ public void TouchPost(int entity, int other)
 				}
 			}
 
-			if (GetEntPropEnt(other, Prop_Send, "m_hGroundEntity") == -1 && !Shavit_GetStyleSettingBool(Shavit_GetBhopStyle(other), "startinair"))
-			{
-				return;
-			}
+			// if (GetEntPropEnt(other, Prop_Send, "m_hGroundEntity") == -1 && !Shavit_GetStyleSettingBool(Shavit_GetBhopStyle(other), "startinair"))
+			// {
+			// 	return;
+			// }
 
+
+			Shavit_StartTimer(other, track);
 			// start timer instantly for main track, but require bonuses to have the current timer stopped
 			// so you don't accidentally step on those while running
-			if (Shavit_GetTimerStatus(other) == Timer_Stopped || Shavit_GetClientTrack(other) != Track_Main)
-			{
-				Shavit_StartTimer(other, track);
-			}
-			else if (track == Track_Main)
-			{
-				Shavit_StartTimer(other, Track_Main);
+			// if (Shavit_GetTimerStatus(other) == Timer_Stopped || Shavit_GetClientTrack(other) != Track_Main)
+			// {
+			// 	Shavit_StartTimer(other, track);
+			// }
+			// else if (track == Track_Main)
+			// {
+			// 	Shavit_StartTimer(other, Track_Main);
 				
-				if(Shavit_IsOnlyStageMode(other) && !Shavit_IsClientRepeat(other))
-				{
-					Shavit_SetOnlyStageMode(other, false);
-				}
-			}
+			// 	if(Shavit_IsOnlyStageMode(other) && !Shavit_IsClientRepeat(other))
+			// 	{
+			// 		Shavit_SetOnlyStageMode(other, false);
+			// 	}
+			// }
 
-			if(gI_HighestStage[track] > 1)
-			{
-				Shavit_StartStageTimer(other, track, 1);
-			}
+			// if(gI_HighestStage[track] > 1)
+			// {
+			// 	Shavit_StartStageTimer(other, track, 1);
+			// }
 		}
 		case Zone_Secret:
 		{
@@ -6161,12 +6124,21 @@ public void TouchPost(int entity, int other)
 				Shavit_PrintToChat(other, "%T", "ZoneSlayEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, gS_ChatStrings.sWarning);
 			}
 		}
-		case Zone_Stop:
+		case Zone_Jail:
 		{
 			if(Shavit_GetTimerStatus(other) != Timer_Stopped)
 			{
 				Shavit_StopTimer(other);
-				Shavit_PrintToChat(other, "%T", "ZoneStopEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, gS_ChatStrings.sWarning);
+				Shavit_PrintToChat(other, "%T", "ZoneJailEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, gS_ChatStrings.sWarning);
+			}
+		}
+
+		case Zone_Stop:
+		{
+			if (Shavit_GetTimerStatus(other) != Timer_Stopped)
+			{
+				Shavit_StopTimer(other);
+				Shavit_PrintToChat(other, "%T", "ZoneStopEnter", other, gS_ChatStrings.sWarning);
 			}
 		}
 	}
