@@ -64,8 +64,8 @@
 #define HUD2_CENTERKEYS         (1 << 16) // CSGO option to toggle whether !keys is shown as center-text or in that panel thing.
 #define HUD2_3DVEL				(1 << 17)
 
-#define HUD_DEFAULT             (HUD_MASTER | HUD_CENTER | HUD_OBSERVE)
-#define HUD_DEFAULT2            (HUD2_SPEED | HUD2_RAMPSPEED)
+#define HUD_DEFAULT             (HUD_MASTER | HUD_ZONEHUD | HUD_CENTER | HUD_3DVEL | HUD_OBSERVE | HUD_SPECTATORS | HUD_WRPB )
+#define HUD_DEFAULT2            (HUD2_STAGEWRPB)
 
 stock bool HUD1Enabled(int hudbits, int flag)
 {

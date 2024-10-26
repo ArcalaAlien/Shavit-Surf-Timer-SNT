@@ -25,7 +25,7 @@
 #define _shavit_core_included
 
 #define SHAVIT_VERSION "3.4.2"
-#define SHAVIT_SURF_VERSION "1.0.3a"
+#define SHAVIT_SURF_VERSION "1.0.4"
 #define STYLE_LIMIT 128 // 256 is too much for style.
 #define MAX_STAGES 64
 
@@ -185,7 +185,29 @@ enum struct track_info
 	{
 		FormatEx(this.trackName, sizeof(this.trackName), name);
 	}
+
+	void reset()
+	{
+		this.bTrackHasCustomName = false;
+		Format(this.trackName, sizeof(this.trackName), "HANDLED_BY_PLUGIN");
+	}
 } 
+
+stock float Shavit_GetClientVelocity(int client)
+{
+// Thanks to TheTwistedPanda for this code:
+	float fTemp[3];
+	float fVelocity;
+	//get proper vector and calculate velocity
+	GetEntPropVector(target, Prop_Data, "m_vecVelocity", fTemp);
+	for(int i = 0; i <= 2; i++)
+	{
+		fTemp[i] *= fTemp[i];
+	}
+	fVelocity = SquareRoot(fTemp[0] + fTemp[1] + fTemp[2]);
+
+	return fVelocity;
+}
 
 stock void Shavit_LogQuery(const char[] query)
 {
@@ -1690,7 +1712,7 @@ native void Shavit_GetTrackInfo(int track, any[] info, int size);
  * 
  *  @return						true if track has a custom name, false if not.
  */
-native bool Shavit_GetCustomTrackName(int client, int track, const char[] buffer, int maxlength)
+native bool Shavit_GetCustomTrackName(int client, int track, const char[] buffer, int maxlength);
 
 /**
  *  Fetches the SQL prefix from the core plugin.

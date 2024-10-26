@@ -25,7 +25,11 @@
 #define _shavit_zones_included
 
 #define MAX_ZONES 512
-#define MAX_STAGES 64
+#define MAX_STAGES 32
+
+#define ITEM_MANTREADS 444
+#define ITEM_SODAPOPPER 448
+#define ITEM_SHIELD "tf_wearable_demoshield"
 
 enum
 {
@@ -540,11 +544,20 @@ native void Shavit_RemoveZone(int index);
 /**
  *  Checks to see if a track has valid zone data.
  * 
- * @param track
+ * @param track		Track Index
  * 
  * @return true / false
  */
 native bool Shavit_IsStageValid(int track);
+
+/**
+ *  Checks to see if a client has practice mode on or off.
+ * 
+ *  @param client	Client Index
+ * 
+ *  @return 	true if practice is on, false otherwise
+ */
+native bool Shavit_CheckPracticeMode(int client);
 
 
 public SharedPlugin __pl_shavit_zones =

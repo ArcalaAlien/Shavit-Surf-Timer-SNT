@@ -20,6 +20,7 @@
  */
 
 #include <sourcemod>
+#include <clientprefs>
 #include <convar_class>
 #include <dhooks>
 #include <morecolors>
@@ -33,8 +34,9 @@
 #undef REQUIRE_PLUGIN
 #include <shavit/rankings>
 #include <shavit/zones>
-#include <sntdb_core>
-#include <sntdb_store>
+#include <sntdb/core>
+#include <sntdb/store>
+#include <sntdb/ranks>
 #include <adminmenu>
 
 #pragma newdecls required
@@ -147,10 +149,14 @@ bool gB_RRSelectMain[MAXPLAYERS+1];
 bool gB_RRSelectBonus[MAXPLAYERS+1];
 bool gB_RRSelectStage[MAXPLAYERS+1];
 
+//Anti-cheese
+Cookie gH_CheeseMode;
+int gI_CheeseMode[MAXPLAYERS+1];
+
 public Plugin myinfo =
 {
 	name = "[shavit-surf] World Records",
-	author = "shavit, SaengerItsWar, KiD Fearless, rtldg, BoomShotKapow, Nuko EDIT BY: Arcala the Gyiyg",
+	author = "shavit, SaengerItsWar, KiD Fearless, rtldg, BoomShotKapow, Nuko, Arcala the Gyiyg",
 	description = "World records shavit surf timer. (This plugin is base on shavit's bhop timer)",
 	version = SHAVIT_SURF_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -243,15 +249,15 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_pb", Command_PersonalBest, "View a player's time on a specific map.");
 
 	// delete records
-	RegAdminCmd("sm_delete", Command_Delete, ADMFLAG_RCON, "Opens a record deletion menu interface.");
-	RegAdminCmd("sm_deleterecord", Command_Delete, ADMFLAG_RCON, "Opens a record deletion menu interface.");
-	RegAdminCmd("sm_deleterecords", Command_Delete, ADMFLAG_RCON, "Opens a record deletion menu interface.");
+	RegAdminCmd("sm_delete", Command_Delete, ADMFLAG_KICK, "Opens a record deletion menu interface.");
+	RegAdminCmd("sm_deleterecord", Command_Delete, ADMFLAG_KICK, "Opens a record deletion menu interface.");
+	RegAdminCmd("sm_deleterecords", Command_Delete, ADMFLAG_KICK, "Opens a record deletion menu interface.");
 	RegAdminCmd("sm_deleteall", Command_DeleteAll, ADMFLAG_RCON, "Deletes all the records for this map.");
 
 	// delete stage records
-	RegAdminCmd("sm_deletestage", Command_DeleteStageRecord, ADMFLAG_RCON, "Opens a stage record deletion menu interface.");
-	RegAdminCmd("sm_deletestagerecord", Command_DeleteStageRecord, ADMFLAG_RCON, "Opens a stage record deletion menu interface.");
-	RegAdminCmd("sm_deletestagerecords", Command_DeleteStageRecord, ADMFLAG_RCON, "Opens a stage record deletion menu interface.");
+	RegAdminCmd("sm_deletestage", Command_DeleteStageRecord, ADMFLAG_KICK, "Opens a stage record deletion menu interface.");
+	RegAdminCmd("sm_deletestagerecord", Command_DeleteStageRecord, ADMFLAG_KICK, "Opens a stage record deletion menu interface.");
+	RegAdminCmd("sm_deletestagerecords", Command_DeleteStageRecord, ADMFLAG_KICK, "Opens a stage record deletion menu interface.");
 	RegAdminCmd("sm_deleteallstage", Command_DeleteAll_Stage, ADMFLAG_RCON, "Deletes all the records for this stage.");
 
 
@@ -260,6 +266,9 @@ public void OnPluginStart()
 	gCV_RecentLimit = new Convar("shavit_wr_recentlimit", "50", "Limit of records shown in the RR menu.", 0, true, 1.0);
 
 	Convar.AutoExecConfig();
+
+	//cheese
+	gH_CheeseMode = new Cookie("shavit_cheese_mode", "Cookie for if a player wants to auto-strip their weapons or not.", CookieAccess_Public);
 
 	// modules
 	gB_Rankings = LibraryExists("shavit-rankings");
@@ -285,13 +294,13 @@ public void OnPluginStart()
 	char sntdb_ConfName[64];
 	int credits;
 	float mins;
-	LoadSQLStoreConfigs(sntdb_ConfName, sizeof(sntdb_ConfName),
-						sntdb_Prefix, sizeof(sntdb_Prefix),
-						sntdb_SchemaName, sizeof(sntdb_SchemaName),
-						"shavit-wr",
-						sntdb_CurrencyName, sizeof(sntdb_CurrencyName),
-						sntdb_CurrencyColor, sizeof(sntdb_CurrencyColor),
-						credits, mins);
+	SNT_LoadSQLStoreConfigs(sntdb_ConfName, sizeof(sntdb_ConfName),
+						    sntdb_Prefix, sizeof(sntdb_Prefix),
+						    sntdb_SchemaName, sizeof(sntdb_SchemaName),
+						    "shavit-wr",
+						    sntdb_CurrencyName, sizeof(sntdb_CurrencyName),
+							sntdb_CurrencyColor, sizeof(sntdb_CurrencyColor),
+							credits, mins);
 
     char error[255];
 
@@ -299,6 +308,20 @@ public void OnPluginStart()
     {
         ThrowError("[SNT] ERROR IN PLUGIN START: %s", error);
     }
+}
+
+public void OnClientCookiesCached(int client)
+{
+	if (IsValidClient(client))
+	{
+		char mode[8];
+		gH_CheeseMode.Get(client, mode, sizeof(mode));
+		
+		if (StrEqual(mode, "On"))
+			gI_CheeseMode[client] = 1;
+		else
+			gI_CheeseMode[client] = 0;
+	}
 }
 
 public void OnAdminMenuReady(Handle topmenu)
@@ -483,18 +506,32 @@ void GetPayoutAmounts()
 	if(!kv.ImportFromFile(sPath))
 	{
 		LogError("Unable to load configs/shavit-payouts.cfg");
-		delete kv;
+		kv.Close();
 		return;
 	}
 
 	kv.JumpToKey("Amounts");
-	Payouts.iWorldRecord = kv.GetNum("WorldRecord");
-	Payouts.iNewPersonalBest = kv.GetNum("NewPersonalBest");
-	Payouts.iRegularFinish = kv.GetNum("RegularFinish");
+	Payouts.fWRPts = kv.GetFloat("WorldRecord");
+	Payouts.fPBPts = kv.GetFloat("NewPersonalBest");
+	Payouts.fRegPts = kv.GetFloat("RegularFinish");
+	Payouts.iWRCred = kv.GetNum("WRCredits");
+	Payouts.iPBCred = kv.GetNum("PBCredits");
+	Payouts.iRegCred = kv.GetNum("RegCredits");
 
-	PrintToServer("Payouts:\nWorldRecord: %i\nNewPersonalBest: %i\nRegularFinish: %i", Payouts.iWorldRecord, Payouts.iNewPersonalBest, Payouts.iRegularFinish);
+	if (SNT_CheckMapType() == 0)
+	{
+		Payouts.fWRPts /= 2;
+		Payouts.fPBPts /= 2;
+		Payouts.fRegPts = 12.0;
+		Payouts.iWRCred /= 2;
+		Payouts.iPBCred /= 2;
+		Payouts.iRegCred /= 2; 
+	}
 
-	delete kv;
+	PrintToServer("Payouts:\nWorldRecord: %i creds %0.f pts\nNewPersonalBest: %i creds %0.f pts\nRegularFinish: %i creds %0.f pts", 
+	Payouts.iWRCred, Payouts.fWRPts, Payouts.iPBCred, Payouts.fPBPts, Payouts.iRegCred, Payouts.fRegPts);
+
+	kv.Close();
 }
 
 public void OnMapStart()
@@ -4088,48 +4125,56 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 	GetClientName(client, sName, sizeof(sName));
 
 	int clientPayout;
+	float clientPoints;
 	bool beatWR = false;
 	bool beatPR = false;
 
-	if(iOverwrite > 0 && (time < gF_WRTime[style][track] || bServerFirstCompletion)) // WR?
+	if (iOverwrite == 0 && (time < gF_WRTime[style][track] || bServerFirstCompletion)) // Call for world record while practicing
+		CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}world {orchid}record!", sntdb_Prefix);
+	else if(iOverwrite > 0 && (time < gF_WRTime[style][track] || bServerFirstCompletion)) // WR?
 	{
 		beatWR = true;
-		CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}world {orchid}record!", sntdb_Prefix, Payouts.iWorldRecord, sntdb_CurrencyColor, sntdb_CurrencyName);
-		clientPayout += Payouts.iWorldRecord;
+		CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}world {orchid}record!", sntdb_Prefix);
+		clientPayout += Payouts.iWRCred;
+		clientPoints += Payouts.fWRPts;
 
-		float fOldWR = gF_WRTime[style][track];
-		gF_WRTime[style][track] = time;
+		if (!Shavit_CheckPracticeMode(client))
+		{
+			float fOldWR = gF_WRTime[style][track];
+			gF_WRTime[style][track] = time;
 
-		gI_WRSteamID[style][track] = iSteamID;
+			gI_WRSteamID[style][track] = iSteamID;
 
-		char sSteamID[20];
-		IntToString(iSteamID, sSteamID, sizeof(sSteamID));
+			char sSteamID[20];
+			IntToString(iSteamID, sSteamID, sizeof(sSteamID));
 
-		ReplaceString(sName, sizeof(sName), "#", "?");
-		gSM_WRNames.SetString(sSteamID, sName, true);
+			ReplaceString(sName, sizeof(sName), "#", "?");
+			gSM_WRNames.SetString(sSteamID, sName, true);
 
-		Call_StartForward(gH_OnWorldRecord);
-		Call_PushCell(client);
-		Call_PushCell(style);
-		Call_PushCell(time);
-		Call_PushCell(jumps);
-		Call_PushCell(strafes);
-		Call_PushCell(sync);
-		Call_PushCell(track);
-		Call_PushCell(0);
-		Call_PushCell(fOldWR);
-		Call_PushCell(oldtime);
-		Call_PushCell(perfs);
-		Call_PushCell(avgvel);
-		Call_PushCell(maxvel);
-		Call_PushCell(timestamp);
-		Call_Finish();
+			Call_StartForward(gH_OnWorldRecord);
+			Call_PushCell(client);
+			Call_PushCell(style);
+			Call_PushCell(time);
+			Call_PushCell(jumps);
+			Call_PushCell(strafes);
+			Call_PushCell(sync);
+			Call_PushCell(track);
+			Call_PushCell(0);
+			Call_PushCell(fOldWR);
+			Call_PushCell(oldtime);
+			Call_PushCell(perfs);
+			Call_PushCell(avgvel);
+			Call_PushCell(maxvel);
+			Call_PushCell(timestamp);
+			Call_Finish();
+		}
 
 		#if defined DEBUG
 		Shavit_PrintToChat(client, "old: %.01f new: %.01f", fOldWR, time);
 		#endif
 
-		ReplaceCPTimes(gH_SQL, client, style, track, cptimes, true);
+		if (!Shavit_CheckPracticeMode(client))
+			ReplaceCPTimes(gH_SQL, client, style, track, cptimes, true);
 	}
 
 	int iRank = GetRankForTime(style, time, track);
@@ -4178,6 +4223,18 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 		Format(sDifferencePB, sizeof(sDifferencePB), "%s+%s%s", gS_ChatStrings.sWarning, sDifferencePB, gS_ChatStrings.sText);
 	}
 
+	if (iOverwrite == 0 && Shavit_CheckPracticeMode(client)) //Practice Run
+	{
+		FormatEx(sMessage, 255, "%T",
+			"WorseTime", client, 
+			gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, 
+			gS_ChatStrings.sText, gS_ChatStrings.sVariable2, sTime, 
+			gS_ChatStrings.sText, sDifferenceWR, sDifferencePB,
+			gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
+			if (!beatWR && !beatPR)
+				CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix);
+	}
+
 	if(iOverwrite > 0)  //Valid Run
 	{
 		float fPoints = gB_Rankings ? Shavit_GuessPointsForTime(track, style, -1, time, gF_WRTime[style][track]) : 0.0;
@@ -4198,7 +4255,8 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 					gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
 					if (!beatWR && !beatPR)
 						CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix);
-					clientPayout += Payouts.iRegularFinish;
+					clientPayout += Payouts.iRegCred;
+					clientPoints += Payouts.fRegPts;
 			}
 			else
 			{
@@ -4213,7 +4271,8 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 					gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
 					if (!beatWR && !beatPR)
 						CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix);
-					clientPayout += Payouts.iRegularFinish;
+					clientPayout += Payouts.iRegCred;
+					clientPoints += Payouts.fRegPts;
 			}
 
 			FormatEx(sQuery, sizeof(sQuery),
@@ -4222,9 +4281,10 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 		}
 		else // Better than PB, Maybe Beat the wr
 		{
-			CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}personal {orchid}best!", sntdb_Prefix, Payouts.iNewPersonalBest, sntdb_CurrencyColor, sntdb_CurrencyName);
+			CPrintToChat(client, "%s {red}You {orange}set {yellow}a {green}new {blue}personal {orchid}best!", sntdb_Prefix);
 			beatPR = true;
-			clientPayout += Payouts.iNewPersonalBest;
+			clientPayout += Payouts.iPBCred;
+			clientPoints += Payouts.fPBPts;
 
 			FormatEx(sMessage, 255, "%T",
 				"NotFirstCompletion", LANG_SERVER, 
@@ -4241,9 +4301,12 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 				gS_MySQLPrefix, time, jumps, timestamp, strafes, sync, fPoints, perfs, gS_Map, iSteamID, style, track);
 		}
 
-		ReplaceCPTimes(gH_SQL, client, style, track, cptimes, false);
+		if (!Shavit_CheckPracticeMode(client))
+		{
+			ReplaceCPTimes(gH_SQL, client, style, track, cptimes, false);
+			QueryLog(gH_SQL, SQL_OnFinish_Callback, sQuery, GetClientSerial(client), DBPrio_High);
+		}
 
-		QueryLog(gH_SQL, SQL_OnFinish_Callback, sQuery, GetClientSerial(client), DBPrio_High);
 
 		Call_StartForward(gH_OnFinish_Post);
 		Call_PushCell(client);
@@ -4263,7 +4326,7 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 		Call_Finish();
 	}
 
-	if(bIncrementCompletions)
+	if(bIncrementCompletions && !Shavit_CheckPracticeMode(client))
 	{
 		if (iOverwrite == 0)
 		{
@@ -4280,8 +4343,9 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 		if(iOverwrite == 0 && !Shavit_GetStyleSettingInt(style, "unranked"))
 		{
 			if (!beatWR && !beatPR)
-				CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix, Payouts.iRegularFinish, sntdb_CurrencyColor, sntdb_CurrencyName);
-			clientPayout += Payouts.iRegularFinish;
+				CPrintToChat(client, "%s {greenyellow}You finished the stage!", sntdb_Prefix);
+			clientPayout += Payouts.iRegCred;
+			clientPoints += Payouts.fRegPts;
 
 			FormatEx(sMessage, 255, "%T",
 				"WorseTime", client, 
@@ -4291,7 +4355,7 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 				gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
 		}
 	}
-	else
+	else if (!bIncrementCompletions && !Shavit_CheckPracticeMode(client))
 	{
 		FormatEx(sMessage, 255, "%T",
 			"UnrankedTime", client, 
@@ -4300,29 +4364,22 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 			gS_ChatStrings.sText, gS_ChatStrings.sStyle, gS_StyleStrings[style].sStyleName, gS_ChatStrings.sText);
 	}
 
-	SNT_AddCredits(client, clientPayout);
-	CPrintToChat(client, "{greenyellow}[%s%i %s{greenyellow}] {default}were added to yer coffers!", sntdb_CurrencyColor, clientPayout, sntdb_CurrencyName);
-
-	timer_snapshot_t aSnapshot;
-	Shavit_SaveSnapshot(client, aSnapshot);
-
-	if (!Shavit_GetStyleSettingBool(style, "autobhop"))
-	{
-		FormatEx(sMessage2, sizeof(sMessage2), "%s[%s]%s %T", gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText, "CompletionExtraInfo", LANG_SERVER, gS_ChatStrings.sVariable, avgvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, maxvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, perfs, gS_ChatStrings.sText);
-	}
+	// FormatEx(sMessage2, sizeof(sMessage2), "%s[%s]%s %T", gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText, "CompletionExtraInfo", LANG_SERVER, gS_ChatStrings.sVariable, avgvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, maxvel, gS_ChatStrings.sText, gS_ChatStrings.sVariable, perfs, gS_ChatStrings.sText);
+	// if (sMessage2[0] != 0)
+	// 	Shavit_PrintToChat(client, "%s", sMessage2);
 
 	Action aResult = Plugin_Continue;
-	Call_StartForward(gH_OnFinishMessage);
-	Call_PushCell(client);
-	Call_PushCellRef(bEveryone);
-	Call_PushArrayEx(aSnapshot, sizeof(timer_snapshot_t), SM_PARAM_COPYBACK);
-	Call_PushCell(iOverwrite);
-	Call_PushCell(iRank);
-	Call_PushStringEx(sMessage, 255, SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
-	Call_PushCell(255);
-	Call_PushStringEx(sMessage2, sizeof(sMessage2), SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
-	Call_PushCell(sizeof(sMessage2));
-	Call_Finish(aResult);
+	if (!Shavit_CheckPracticeMode(client))
+	{
+		SNT_AddCredits(client, clientPayout);
+		SNT_AddPoints(client, clientPoints);
+		CPrintToChat(client, "Ye earned {greenyellow}(%.2f points){default} and %s(%i %s){default}!", clientPoints, sntdb_CurrencyColor, clientPayout, sntdb_CurrencyName);
+	}
+	else
+		aResult = Plugin_Handled;
+
+	if (Shavit_CheckPracticeMode(client))
+		Shavit_PrintToChat(client, "%sYour time has not been saved.", gS_ChatStrings.sWarning);
 
 	if(aResult < Plugin_Handled)
 	{
@@ -4332,11 +4389,11 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 		}
 		else
 		{
-			Shavit_PrintToChat(client, "%s", sMessage);
+			// Shavit_PrintToChat(client, "%s", sMessage);
 
 			for(int i = 1; i <= MaxClients; i++)
 			{
-				if(client != i && IsValidClient(i) && GetSpectatorTarget(i) == client)	//Print to spectator if target finished and worse
+				if(client != i && IsValidClient(i) && GetSpectatorTarget(i) == client && !Shavit_CheckPracticeMode(client))	//Print to spectator if target finished and worse
 				{
 					FormatEx(sMessage, sizeof(sMessage), "%T",
 						"NotFirstCompletionWorse", i, 
@@ -4356,14 +4413,31 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 			}
 		}
 
-		if (sMessage2[0] != 0)
-		{
-			Shavit_PrintToChat(client, "%s", sMessage2);
-		}
+		// if (sMessage2[0] != 0)
+		// {
+		// 	Shavit_PrintToChat(client, "%s", sMessage2);
+		// }
 	}
 
+	Shavit_PrintToChat(client, "%s", sMessage);
+
+	timer_snapshot_t aSnapshot;
+	Shavit_SaveSnapshot(client, aSnapshot);
+
+	Call_StartForward(gH_OnFinishMessage);
+	Call_PushCell(client);
+	Call_PushCellRef(bEveryone);
+	Call_PushArrayEx(aSnapshot, sizeof(timer_snapshot_t), SM_PARAM_COPYBACK);
+	Call_PushCell(iOverwrite);
+	Call_PushCell(iRank);
+	Call_PushStringEx(sMessage, 255, SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+	Call_PushCell(255);
+	Call_PushStringEx(sMessage2, sizeof(sMessage2), SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+	Call_PushCell(sizeof(sMessage2));
+	Call_Finish(aResult);
+
 	// update pb cache only after sending the message so we can grab the old one inside the Shavit_OnFinishMessage forward
-	if(iOverwrite > 0)
+	if(iOverwrite > 0 && !Shavit_CheckPracticeMode(client))
 	{
 		gF_PlayerRecord[client][style][track] = time;
 	}

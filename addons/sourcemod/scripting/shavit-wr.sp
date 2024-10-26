@@ -33,8 +33,8 @@
 #undef REQUIRE_PLUGIN
 #include <shavit/rankings>
 #include <shavit/zones>
-#include <sntdb_core>
-#include <sntdb_store>
+#include <sntdb/core>
+#include <sntdb/store>
 #include <adminmenu>
 
 #pragma newdecls required
@@ -243,17 +243,16 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_pb", Command_PersonalBest, "View a player's time on a specific map.");
 
 	// delete records
-	RegAdminCmd("sm_delete", Command_Delete, ADMFLAG_RCON, "Opens a record deletion menu interface.");
-	RegAdminCmd("sm_deleterecord", Command_Delete, ADMFLAG_RCON, "Opens a record deletion menu interface.");
-	RegAdminCmd("sm_deleterecords", Command_Delete, ADMFLAG_RCON, "Opens a record deletion menu interface.");
-	RegAdminCmd("sm_deleteall", Command_DeleteAll, ADMFLAG_RCON, "Deletes all the records for this map.");
+	RegAdminCmd("sm_delete", Command_Delete, ADMFLAG_KICK, "Opens a record deletion menu interface.");
+	RegAdminCmd("sm_deleterecord", Command_Delete, ADMFLAG_KICK, "Opens a record deletion menu interface.");
+	RegAdminCmd("sm_deleterecords", Command_Delete, ADMFLAG_KICK, "Opens a record deletion menu interface.");
+	RegAdminCmd("sm_deleteall", Command_DeleteAll, ADMFLAG_KICK, "Deletes all the records for this map.");
 
 	// delete stage records
-	RegAdminCmd("sm_deletestage", Command_DeleteStageRecord, ADMFLAG_RCON, "Opens a stage record deletion menu interface.");
-	RegAdminCmd("sm_deletestagerecord", Command_DeleteStageRecord, ADMFLAG_RCON, "Opens a stage record deletion menu interface.");
-	RegAdminCmd("sm_deletestagerecords", Command_DeleteStageRecord, ADMFLAG_RCON, "Opens a stage record deletion menu interface.");
-	RegAdminCmd("sm_deleteallstage", Command_DeleteAll_Stage, ADMFLAG_RCON, "Deletes all the records for this stage.");
-
+	RegAdminCmd("sm_deletestage", Command_DeleteStageRecord, ADMFLAG_KICK, "Opens a stage record deletion menu interface.");
+	RegAdminCmd("sm_deletestagerecord", Command_DeleteStageRecord, ADMFLAG_KICK, "Opens a stage record deletion menu interface.");
+	RegAdminCmd("sm_deletestagerecords", Command_DeleteStageRecord, ADMFLAG_KICK, "Opens a stage record deletion menu interface.");
+	RegAdminCmd("sm_deleteallstage", Command_DeleteAll_Stage, ADMFLAG_KICK, "Deletes all the records for this stage.");
 
 	// cvars
 	gCV_RecordsLimit = new Convar("shavit_wr_recordlimit", "50", "Limit of records shown in the WR menu.\nAdvised to not set above 1,000 because scrolling through so many pages is useless.\n(And can also cause the command to take long time to run)", 0, true, 1.0);
@@ -285,13 +284,13 @@ public void OnPluginStart()
 	char sntdb_ConfName[64];
 	int credits;
 	float mins;
-	LoadSQLStoreConfigs(sntdb_ConfName, sizeof(sntdb_ConfName),
-						sntdb_Prefix, sizeof(sntdb_Prefix),
-						sntdb_SchemaName, sizeof(sntdb_SchemaName),
-						"shavit-wr",
-						sntdb_CurrencyName, sizeof(sntdb_CurrencyName),
-						sntdb_CurrencyColor, sizeof(sntdb_CurrencyColor),
-						credits, mins);
+	SNT_LoadSQLStoreConfigs(sntdb_ConfName, sizeof(sntdb_ConfName),
+						    sntdb_Prefix, sizeof(sntdb_Prefix),
+						    sntdb_SchemaName, sizeof(sntdb_SchemaName),
+						    "shavit-wr",
+						    sntdb_CurrencyName, sizeof(sntdb_CurrencyName),
+							sntdb_CurrencyColor, sizeof(sntdb_CurrencyColor),
+							credits, mins);
 
     char error[255];
 

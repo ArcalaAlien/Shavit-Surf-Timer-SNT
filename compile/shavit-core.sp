@@ -204,7 +204,7 @@ track_info currentTrackInfo[TRACKS_SIZE];
 public Plugin myinfo =
 {
 	name = "[shavit-surf] Core",
-	author = "shavit, rtldg, KiD Fearless, GAMMA CASE, Technoblazed, carnifex, ofirgall, Nairda, Extan, rumour, OliviaMourning, Nickelony, sh4hrazad, BoomShotKapow, strafe EDIT BY: Arcala the Gyiyg",
+	author = "shavit, rtldg, KiD Fearless, GAMMA CASE, Technoblazed, carnifex, ofirgall, Nairda, Extan, rumour, OliviaMourning, Nickelony, sh4hrazad, BoomShotKapow, strafe, Arcala the Gyiyg",
 	description = "The core for shavit surf timer. (This plugin is base on shavit's bhop timer)",
 	version = SHAVIT_SURF_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -387,6 +387,7 @@ public void OnPluginStart()
 	//repeat command
 	RegConsoleCmd("sm_repeat", Command_ToggleRepeat, "Repeat client's timer to a stage or a bonus.");
 
+	RegAdminCmd("sm_shavit_loaddb", Command_ForceDBLoad, ADMFLAG_ROOT, "Force the database to load.");
 
 	char mapName[64];
 	GetCurrentMap(mapName, sizeof(mapName));
@@ -714,6 +715,9 @@ public void OnMapStart()
 	}
 
 	gCV_Enabled = FindConVar("snt_sp_is_skurf");
+	for (int i; i < TRACKS_SIZE; i ++)
+		currentTrackInfo[i].reset();
+
 	RefreshTrackNames();
 }
 
@@ -1195,7 +1199,7 @@ public Action Command_TeleportEnd(int client, int args)
 
 public Action Command_StopTimer(int client, int args)
 {
-	if(!IsValidClient(client))
+	if(client == 0)
 	{
 		return Plugin_Handled;
 	}
@@ -1203,8 +1207,14 @@ public Action Command_StopTimer(int client, int args)
 	if (!gCV_Enabled.BoolValue)
 		return Plugin_Handled;
 
-	Shavit_StopTimer(client, false);
-	Shavit_PrintToChat(client, "%sYou %sstopped%s your timer!", gS_ChatStrings.sText, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
+	if (IsValidClient(client))
+	{
+		if (Shavit_GetTimerStatus(client) != Timer_Stopped)
+		{
+			Shavit_StopTimer(client, false);
+			Shavit_PrintToChat(client, "%sYou %sstopped%s your timer!", gS_ChatStrings.sText, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
+		}
+	}
 
 	return Plugin_Handled;
 }
@@ -2057,7 +2067,7 @@ void CallOnStyleChanged(int client, int oldstyle, int newstyle, bool manual, boo
 
 	UpdateStyleSettings(client);
 
-	SetEntityGravity(client, GetStyleSettingFloat(newstyle, "gravity"));
+	//SetEntityGravity(client, GetStyleSettingFloat(newstyle, "gravity"));
 }
 
 void CallOnTimescaleChanged(int client, float oldtimescale, float newtimescale)
@@ -3481,7 +3491,7 @@ void StartTimer(int client, int track)
 			gA_Timers[client].fplayer_speedmod = 1.0;
 			UpdateLaggedMovement(client, true);
 
-			SetEntityGravity(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "gravity"));
+			//SetEntityGravity(client, GetStyleSettingFloat(gA_Timers[client].bsStyle, "gravity"));
 		// }
 #if 0
 		else if(result == Plugin_Handled || result == Plugin_Stop)
@@ -3836,6 +3846,7 @@ public void SQL_GetTrackInfo_Callback(Database db, DBResultSet results, const ch
 		}
 		else
 		{
+			currentTrackInfo[track].bTrackHasCustomName = false;
 			char output[64];
 			if (track == 0)
 				FormatEx(output, sizeof(output), "%T", "Track_Main", 0);
@@ -3947,7 +3958,7 @@ public void PreThinkPost(int client)
 
 			if (g != 0.0)
 			{
-				SetEntityGravity(client, g);
+				//SetEntityGravity(client, g);
 			}
 		}
 	}
@@ -4511,11 +4522,11 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		// SetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", fSpeed);
 	}
 
-	if (GetStyleSettingBool(gA_Timers[client].bsStyle, "autobhop") && gB_Auto[client] && (buttons & IN_JUMP) > 0 && mtMoveType == MOVETYPE_WALK && !bInWater)
-	{
-		int iOldButtons = GetEntProp(client, Prop_Data, "m_nOldButtons");
-		SetEntProp(client, Prop_Data, "m_nOldButtons", (iOldButtons & ~IN_JUMP));
-	}
+	// if (GetStyleSettingBool(gA_Timers[client].bsStyle, "autobhop") && gB_Auto[client] && (buttons & IN_JUMP) > 0 && mtMoveType == MOVETYPE_WALK && !bInWater)
+	// {
+	// 	int iOldButtons = GetEntProp(client, Prop_Data, "m_nOldButtons");
+	// 	SetEntProp(client, Prop_Data, "m_nOldButtons", (iOldButtons & ~IN_JUMP));
+	// }
 
 	// perf jump measuring
 	bool bOnGround = (!bInWater && mtMoveType == MOVETYPE_WALK && iGroundEntity != -1);
@@ -4770,4 +4781,10 @@ void UpdateStyleSettings(int client)
 	}
 
 	UpdateAiraccelerate(client, 300.0);
+}
+
+public Action Command_ForceDBLoad(int client, int args)
+{
+	SQL_DBConnect();
+	return Plugin_Handled;
 }

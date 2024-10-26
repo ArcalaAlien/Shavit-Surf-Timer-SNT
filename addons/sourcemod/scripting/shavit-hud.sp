@@ -206,17 +206,15 @@ public void OnPluginStart()
 	#endif
 	gB_DynamicChannels = LibraryExists("DynamicChannels");
 
-	// HUD handle
-	gH_HUDTopleft = CreateHudSynchronizer();
-	gH_HUDCenter = CreateHudSynchronizer();
 
-	// plugin convars
+// plugin convars
 	gCV_GradientStepSize = new Convar("shavit_hud_gradientstepsize", "15", "How fast should the start/end HUD gradient be?\nThe number is the amount of color change per 0.1 seconds.\nThe higher the number the faster the gradient.", 0, true, 1.0, true, 255.0);
 	gCV_TicksPerUpdate = new Convar("shavit_hud_ticksperupdate", "5", "How often (in ticks) should the HUD update?\nPlay around with this value until you find the best for your server.\nThe maximum value is your tickrate.\nNote: You should probably avoid 1-2 on CSS since players will probably feel stuttery FPS due to all the usermessages.", 0, true, 1.0, true, (1.0 / GetTickInterval()));
 	gCV_SpectatorList = new Convar("shavit_hud_speclist", "1", "Who to show in the specators list?\n0 - everyone\n1 - all admins (admin_speclisthide override to bypass)\n2 - players you can target", 0, true, 0.0, true, 2.0);
 	gCV_UseHUDFix = new Convar("shavit_hud_csgofix", "1", "Apply the csgo color fix to the center hud?\nThis will add a dollar sign and block sourcemod hooks to hint message", 0, true, 0.0, true, 1.0);
 	gCV_SpecNameSymbolLength = new Convar("shavit_hud_specnamesymbollength", "32", "Maximum player name length that should be displayed in spectators panel", 0, true, 0.0, true, float(MAX_NAME_LENGTH));
 	gCV_BlockYouHaveSpottedHint = new Convar("shavit_hud_block_spotted_hint", "1", "Blocks the hint message for spotting an enemy or friendly (which covers the center HUD)", 0, true, 0.0, true, 1.0);
+
 
 	char defaultHUD[8];
 	IntToString(HUD_DEFAULT, defaultHUD, 8);
@@ -285,18 +283,18 @@ public void OnPluginStart()
 
 	// RegConsoleCmd("sm_zonehud", Command_ZoneHUD, "Toggles zone HUD.");
 
-	// RegConsoleCmd("sm_hideweapon", Command_HideWeapon, "Toggles weapon hiding.");
-	// RegConsoleCmd("sm_hideweap", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
-	// RegConsoleCmd("sm_hideweps", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
-	// RegConsoleCmd("sm_hidewep", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
+	RegConsoleCmd("sm_hideweapon", Command_HideWeapon, "Toggles weapon hiding.");
+	RegConsoleCmd("sm_hideweap", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
+	RegConsoleCmd("sm_hideweps", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
+	RegConsoleCmd("sm_hidewep", Command_HideWeapon, "Toggles weapon hiding. (alias for sm_hideweapon)");
 
 	// RegConsoleCmd("sm_truevel", Command_TrueVel, "Toggles 2D ('true') velocity.");
 	// RegConsoleCmd("sm_truvel", Command_TrueVel, "Toggles 2D ('true') velocity. (alias for sm_truevel)");
 	// RegConsoleCmd("sm_2dvel", Command_TrueVel, "Toggles 2D ('true') velocity. (alias for sm_truevel)");
 
-	// AddCommandListener(Command_SpecNextPrev, "spec_player");
-	// AddCommandListener(Command_SpecNextPrev, "spec_next");
-	// AddCommandListener(Command_SpecNextPrev, "spec_prev");
+	AddCommandListener(Command_SpecNextPrev, "spec_player");
+	AddCommandListener(Command_SpecNextPrev, "spec_next");
+	AddCommandListener(Command_SpecNextPrev, "spec_prev");
 
 	// cookies
 	gH_HUDCookie = RegClientCookie("shavit_hud_setting", "HUD settings", CookieAccess_Protected);
@@ -666,19 +664,19 @@ void ToggleHUD(int client, int hud, bool chat)
 	}
 }
 
-// void Frame_UpdateTopLeftHUD(int serial)
-// {
-// 	int client = GetClientFromSerial(serial);
+void Frame_UpdateTopLeftHUD(int serial)
+{
+	int client = GetClientFromSerial(serial);
 
-// 	if (client)
-// 	{
-// 		UpdateTopLeftHUD(client, false);
-// 	}
-// }
+	if (client)
+	{
+		UpdateTopLeftHUD(client, false);
+	}
+}
 
 public Action Command_SpecNextPrev(int client, const char[] command, int args)
 {
-	//RequestFrame(Frame_UpdateTopLeftHUD, GetClientSerial(client));
+	RequestFrame(Frame_UpdateTopLeftHUD, GetClientSerial(client));
 	return Plugin_Continue;
 }
 
@@ -754,13 +752,16 @@ Action ShowHUDMenu(int client, int item)
 	FormatEx(sHudItem, 64, "%T", "HudZoneHud", client);
 	menu.AddItem(sInfo, sHudItem);
 
-	FormatEx(sInfo, 16, "@%d", HUD2_TIME);
-	FormatEx(sHudItem, 64, "%T", "HudTimeText", client);
+	//FormatEx(sInfo, 16, "@%d", HUD2_TIME);
+	//FormatEx(sHudItem, 64, "%T", "HudTimeText", client);
 	//menu.AddItem(sInfo, sHudItem);
 
-	FormatEx(sInfo, 16, "@%d", HUD2_RANK);
-	FormatEx(sHudItem, 64, "%T", "HudRankText", client);
-	menu.AddItem(sInfo, sHudItem);
+	// FormatEx(sInfo, 16, "@%d", HUD2_RANK);
+	// FormatEx(sHudItem, 64, "%T", "HudRankText", client);
+	// menu.AddItem(sInfo, sHudItem);
+
+	FormatEx(sInfo, 16, "!%d", HUD_3DVEL);
+	menu.AddItem(sInfo, "Speedometer");
 
 	if(gB_ReplayPlayback)
 	{
@@ -779,7 +780,7 @@ Action ShowHUDMenu(int client, int item)
 
 	FormatEx(sInfo, 16, "@%d", HUD2_STAGETIME);
 	FormatEx(sHudItem, 64, "%T", "HudStageTime", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	FormatEx(sInfo, 16, "@%d", HUD2_JUMPS);
 	FormatEx(sHudItem, 64, "%T", "HudJumpsText", client);
@@ -791,15 +792,15 @@ Action ShowHUDMenu(int client, int item)
 
 	FormatEx(sInfo, 16, "@%d", HUD2_SYNC);
 	FormatEx(sHudItem, 64, "%T", "HudSync", client);
-	//menu.AddItem(sInfo, sHudItem);
-
-	FormatEx(sInfo, 16, "@%d", HUD2_SPEED);
-	FormatEx(sHudItem, 64, "%T", "HudSpeedText", client);
 	menu.AddItem(sInfo, sHudItem);
 
-	FormatEx(sInfo, 16, "!%d", HUD_DEBUGTARGETNAME);
-	FormatEx(sHudItem, 64, "%T", "HudDebugTargetname", client);
-	menu.AddItem(sInfo, sHudItem);
+	// FormatEx(sInfo, 16, "@%d", HUD2_SPEED);
+	// FormatEx(sHudItem, 64, "%T", "HudSpeedText", client);
+	// menu.AddItem(sInfo, sHudItem);
+
+	// FormatEx(sInfo, 16, "!%d", HUD_DEBUGTARGETNAME);
+	// FormatEx(sHudItem, 64, "%T", "HudDebugTargetname", client);
+	// menu.AddItem(sInfo, sHudItem);
 
 	// Side HUD 
 	FormatEx(sInfo, 16, "!%d", HUD_OBSERVE);
@@ -816,25 +817,21 @@ Action ShowHUDMenu(int client, int item)
 
 	if(IsSource2013(gEV_Type))
 	{
-		FormatEx(sInfo, 16, "!%d", HUD_TIMELEFT);
-		FormatEx(sHudItem, 64, "%T", "HudTimeLeft", client);
+		// FormatEx(sInfo, 16, "!%d", HUD_TIMELEFT);
+		// FormatEx(sHudItem, 64, "%T", "HudTimeLeft", client);
 		//menu.AddItem(sInfo, sHudItem);
 	}
 
-	FormatEx(sInfo, 16, "@%d", HUD2_STYLE);
-	FormatEx(sHudItem, 64, "%T", "HudStyleText", client);
+	// FormatEx(sInfo, 16, "@%d", HUD2_STYLE);
+	// FormatEx(sHudItem, 64, "%T", "HudStyleText", client);
 	//menu.AddItem(sInfo, sHudItem);
 	
 	FormatEx(sInfo, 16, "!%d", HUD_WRPB);
 	FormatEx(sHudItem, 64, "%T", "HudWRPB", client);
 	menu.AddItem(sInfo, sHudItem);
 
-	FormatEx(sInfo, 16, "!%d", HUD_3DVEL);
-	FormatEx(sHudItem, 64, "%T", "Hud3DVel", client);
-	menu.AddItem(sInfo, sHudItem);
-
-	FormatEx(sInfo, 16, "@%d", HUD2_STAGEWRPB);
-	FormatEx(sHudItem, 64, "%T", "HudStageWRPB", client);
+	// FormatEx(sInfo, 16, "@%d", HUD2_STAGEWRPB);
+	// FormatEx(sHudItem, 64, "%T", "HudStageWRPB", client);
 	//menu.AddItem(sInfo, sHudItem);
 
 	FormatEx(sInfo, 16, "@%d", HUD2_SPLITPB);
@@ -866,9 +863,9 @@ Action ShowHUDMenu(int client, int item)
 		menu.AddItem(sInfo, sHudItem);
 	}
 
-	FormatEx(sInfo, 16, "!%d", HUD_NOPRACALERT);
-	FormatEx(sHudItem, 64, "%T", "HudPracticeModeAlert", client);
-	menu.AddItem(sInfo, sHudItem);
+	// FormatEx(sInfo, 16, "!%d", HUD_NOPRACALERT);
+	// FormatEx(sHudItem, 64, "%T", "HudPracticeModeAlert", client);
+	// menu.AddItem(sInfo, sHudItem);
 
 	if (gEV_Type != Engine_TF2)
 	{
@@ -897,7 +894,7 @@ Action ShowHUDMenu(int client, int item)
 
 	FormatEx(sInfo, 16, "@%d", HUD2_RAMPSPEED);
 	FormatEx(sHudItem, 64, "%T", "HudRampSpeedText", client);
-	menu.AddItem(sInfo, sHudItem);
+	//menu.AddItem(sInfo, sHudItem);
 
 	menu.ExitButton = true;
 	menu.DisplayAt(client, item, MENU_TIME_FOREVER);
@@ -1428,12 +1425,6 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 	}
 	else
 	{
-		if(data.bPractice || data.iTimerStatus == Timer_Paused)
-		{
-			FormatEx(sLine, 128, "%T", (data.iTimerStatus == Timer_Paused)? "HudPaused":"HudPracticeMode", client);
-			AddHUDLine(buffer, maxlen, sLine, iLines);
-		}
-
 		if((gI_HUDSettings[client] & HUD_ZONEHUD) > 0 && data.iZoneHUD != ZoneHUD_None)
 		{
 
@@ -1482,6 +1473,12 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 
 				AddHUDLine(buffer, maxlen, sLine, iLines);
 				AddHUDLine(buffer, maxlen, " ", iLines);
+
+				if(Shavit_CheckPracticeMode(client))
+				{
+					FormatEx(sLine, 128, "Practice Mode", sLine);
+					AddHUDLine(buffer, maxlen, sLine, iLines);
+				}
 			}
 
 			if((gI_HUD2Settings[client] & HUD2_TRACK) == 0)
@@ -1535,30 +1532,30 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 				AddHUDLine(buffer, maxlen, " ", iLines);
 			}
 
-			// if((gI_HUD2Settings[client] & HUD2_JUMPS) == 0)
-			// {
-			// 	FormatEx(sLine, 128, "%T: %d", "HudJumpsText", client, data.iJumps);
-			// 	AddHUDLine(buffer, maxlen, sLine, iLines);
-			// }
+			if((gI_HUD2Settings[client] & HUD2_JUMPS) == 0)
+			{
+				FormatEx(sLine, 128, "%T: %d", "HudJumpsText", client, data.iJumps);
+				AddHUDLine(buffer, maxlen, sLine, iLines);
+			}
 
-			// if((gI_HUD2Settings[client] & HUD2_STRAFE) == 0)
-			// {
-			// 	if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
-			// 	{
-			// 		FormatEx(sLine, 128, "%T: %d (%.1f％)", "HudStrafeText", client, data.iStrafes, data.fSync);
-			// 	}
-			// 	else
-			// 	{
-			// 		FormatEx(sLine, 128, "%T: %d", "HudStrafeText", client, data.iStrafes);
-			// 	}
+			if((gI_HUD2Settings[client] & HUD2_STRAFE) == 0)
+			{
+				if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
+				{
+					FormatEx(sLine, 128, "%T: %d (%.1f％)", "HudStrafeText", client, data.iStrafes, data.fSync);
+				}
+				else
+				{
+					FormatEx(sLine, 128, "%T: %d", "HudStrafeText", client, data.iStrafes);
+				}
 
-			// 	AddHUDLine(buffer, maxlen, sLine, iLines);
-			// }
-			// else if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
-			// {
-			// 	FormatEx(sLine, 128, "%T: %.1f％", "HudSync", client, data.fSync);
-			// 	AddHUDLine(buffer, maxlen, sLine, iLines);
-			// }
+				AddHUDLine(buffer, maxlen, sLine, iLines);
+			}
+			else if((gI_HUD2Settings[client] & HUD2_SYNC) == 0)
+			{
+				FormatEx(sLine, 128, "%T: %.1f％", "HudSync", client, data.fSync);
+				AddHUDLine(buffer, maxlen, sLine, iLines);
+			}
 		}
 		else
 		{
@@ -2497,23 +2494,25 @@ void UpdateKeyHint(int client, bool force = false)
 		return;
 	}
 
+	if((gI_HUDSettings[client] & HUD_3DVEL) > 0)
+	{
+		// Thanks to TheTwistedPanda for this code:
+		float fTemp[3];
+		float fVelocity;
+		//get proper vector and calculate velocity
+		GetEntPropVector(target, Prop_Data, "m_vecVelocity", fTemp);
+		for(int i = 0; i <= 2; i++)
+		{
+			fTemp[i] *= fTemp[i];
+		}
+		fVelocity = SquareRoot(fTemp[0] + fTemp[1] + fTemp[2]);
+
+		FormatEx(sMessage, 256, "%T", "HudSpeedo", client, fVelocity);
+	}
+
 	if((gI_HUDSettings[client] & HUD_OBSERVE) > 0)
 	{
-		if((gI_HUDSettings[client] & HUD_3DVEL) == 0)
-		{
-			// Thanks to TheTwistedPanda for this code:
-			float fTemp[3];
-			float fVelocity;
-			//get proper vector and calculate velocity
-			GetEntPropVector(target, Prop_Data, "m_vecVelocity", fTemp);
-			for(int i = 0; i <= 2; i++)
-			{
-				fTemp[i] *= fTemp[i];
-			}
-			fVelocity = SquareRoot(fTemp[0] + fTemp[1] + fTemp[2]);
-
-			FormatEx(sMessage, 256, "%T", "HudSpeedo", client, fVelocity);
-		}
+		
 
 		// if((gI_HUDSettings[client] & HUD_TIMELEFT) > 0 && GetMapTimeLeft(iTimeLeft) && iTimeLeft > 0)
 		// {

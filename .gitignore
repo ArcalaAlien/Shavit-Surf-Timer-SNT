@@ -10,4 +10,5 @@
 \.vscode/settings\.json
 
 # I can't compile in the regular folder for some reason yaaay
-compile
+compile/*
+./compile

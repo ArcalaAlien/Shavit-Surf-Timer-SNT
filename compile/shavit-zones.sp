@@ -32,16 +32,19 @@
 #include <shavit/hud>
 #include <shavit/physicsuntouch>
 
-#include <stocksoup/tf/econ>
+#include <sntdb/core>
 
 #undef REQUIRE_PLUGIN
 #include <adminmenu>
+#include <tf2attributes>
+#include <tf2items>
 #include <shavit/replay-recorder>
 #include <shavit/replay-playback>
 
 #undef REQUIRE_EXTENSIONS
 #include <cstrike>
 #include <tf2>
+#include <tf2_stocks>
 #include <eventqueuefix>
 
 #pragma semicolon 1
@@ -64,7 +67,6 @@ Database gH_SQL = null;
 int gI_Driver = Driver_unknown;
 
 bool gB_YouCanLoadZonesNow = false;
-
 char gS_Map[PLATFORM_MAX_PATH];
 
 enum struct zone_settings_t
@@ -82,6 +84,40 @@ enum struct zone_settings_t
 	int iHalo;
 	int iSpeed;
 	char sBeam[PLATFORM_MAX_PATH];
+}
+
+enum struct TFWeapon
+{
+	int index;
+	char weapon_class[64];
+	char weapon_name[64];
+
+	void setClass(char[] classtype)
+	{
+		strcopy(this.weapon_class, sizeof(this.weapon_class), classtype);
+	}
+
+	void setName(char[] name)
+	{
+		strcopy(this.weapon_name, sizeof(this.weapon_name), name);
+	}
+
+	void getClass(char[] buffer, int maxlen)
+	{
+		strcopy(buffer, maxlen, this.weapon_class);
+	}
+
+	void getName(char[] buffer, int maxlen)
+	{
+		strcopy(buffer, maxlen, this.weapon_name);
+	}
+
+	void reset()
+	{
+		this.index = -1;
+		strcopy(this.weapon_class, sizeof(this.weapon_class), "");
+		strcopy(this.weapon_name, sizeof(this.weapon_name), "");
+	}
 }
 
 // 0 - nothing
@@ -118,6 +154,7 @@ float gV_MapZones_Visual[MAX_ZONES][8][3];
 float gV_ZoneCenter[MAX_ZONES][3];
 float gF_CustomSpawn[TRACKS_SIZE][3];
 int gI_EntityZone[2048] = {-1, ...};
+int prevTrack[MAXPLAYERS + 1];
 track_info currentTrackInfo[TRACKS_SIZE];
 
 // stage & checkpoint stuffs
@@ -161,6 +198,7 @@ Convar gCV_ResetClassnameMain = null;
 Convar gCV_ResetClassnameBonus = null;
 
 ConVar gCV_PrestrafeLimit = null;
+ConVar sv_cheats = null;
 
 // handles
 Handle gH_DrawVisible = null;
@@ -206,6 +244,13 @@ bool gB_ReplayRecorder = false;
 bool gB_ReplayPlayback = false;
 bool gB_AdminMenu = false;
 
+// Cheese prevention
+bool gB_ShownPanel[MAXPLAYERS+1] = {false, ...};
+bool gB_PracticeEnabled[MAXPLAYERS+1] = {false, ...};
+Cookie gH_CheeseModeCookie = null;
+Cookie gH_ShownPanelCookie = null;
+Handle rmvWeaponTimer[MAXPLAYERS+1] = {INVALID_HANDLE, ...};
+
 #define CZONE_VER 'b'
 // custom zone stuff
 Cookie gH_CustomZoneCookie = null;
@@ -215,10 +260,11 @@ int gI_ZoneWidth[MAXPLAYERS+1][ZONETYPES_SIZE][TRACKS_SIZE];
 
 int gI_LastMenuPos[MAXPLAYERS+1];
 
+
 public Plugin myinfo =
 {
 	name = "[shavit-surf] Map Zones",
-	author = "shavit, GAMMA CASE, rtldg, KiD Fearless, Kryptanyte, carnifex, rumour, BoomShotKapow, Nuko, Technoblazed, Kxnrl, Extan, sh4hrazad, OliviaMourning EDIT BY: Arcala the Gyiyg",
+	author = "shavit, GAMMA CASE, rtldg, KiD Fearless, Kryptanyte, carnifex, rumour, BoomShotKapow, Nuko, Technoblazed, Kxnrl, Extan, sh4hrazad, OliviaMourning, Arcala the Gyiyg",
 	description = "Map zones for shavit surf timer. (This plugin is base on shavit's bhop timer)",
 	version = SHAVIT_SURF_VERSION,
 	url = "https://github.com/shavitush/bhoptimer"
@@ -252,6 +298,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_InsideZoneStage", Native_InsideZoneStage);
 	CreateNative("Shavit_GetZoneUseSpeedLimit", Native_GetZoneUseSpeedLimit);
 	CreateNative("Shavit_IsStageValid", Native_IsStageValid);
+	CreateNative("Shavit_CheckPracticeMode", Native_CheckPracticeMode);
 
 	// registers library, check "bool LibraryExists(const char[] name)" in order to use with other plugins
 	RegPluginLibrary("shavit-zones");
@@ -275,14 +322,14 @@ public void OnPluginStart()
 	RegAdminCmd("sm_zone", Command_Zones, ADMFLAG_KICK, "Opens the mapzones menu.");
 	RegAdminCmd("sm_mapzones", Command_Zones, ADMFLAG_KICK, "Opens the mapzones menu. Alias of sm_zones.");
 
-	RegAdminCmd("sm_delzone", Command_DeleteZone, ADMFLAG_UNBAN, "Delete a mapzone");
-	RegAdminCmd("sm_deletezone", Command_DeleteZone, ADMFLAG_UNBAN, "Delete a mapzone");
+	RegAdminCmd("sm_delzone", Command_DeleteZone, ADMFLAG_KICK, "Delete a mapzone");
+	RegAdminCmd("sm_deletezone", Command_DeleteZone, ADMFLAG_KICK, "Delete a mapzone");
 	RegAdminCmd("sm_deleteallzones", Command_DeleteAllZones, ADMFLAG_RCON, "Delete all mapzones");
 
 	RegAdminCmd("sm_modifier", Command_Modifier, ADMFLAG_KICK, "Changes the axis modifier for the zone editor. Usage: sm_modifier <number>");
 
-	RegAdminCmd("sm_addspawn", Command_AddSpawn, ADMFLAG_RCON, "Adds a custom spawn location");
-	RegAdminCmd("sm_delspawn", Command_DelSpawn, ADMFLAG_RCON, "Deletes a custom spawn location");
+	RegAdminCmd("sm_addspawn", Command_AddSpawn, ADMFLAG_KICK, "Adds a custom spawn location");
+	RegAdminCmd("sm_delspawn", Command_DelSpawn, ADMFLAG_KICK, "Deletes a custom spawn location");
 
 	RegAdminCmd("sm_zoneedit", Command_ZoneEdit, ADMFLAG_KICK, "Modify an existing zone.");
 	RegAdminCmd("sm_editzone", Command_ZoneEdit, ADMFLAG_KICK, "Modify an existing zone. Alias of sm_zoneedit.");
@@ -293,35 +340,45 @@ public void OnPluginStart()
 
 	RegAdminCmd("sm_reloadzonesettings", Command_ReloadZoneSettings, ADMFLAG_ROOT, "Reloads the zone settings.");
 
+	RegConsoleCmd("sm_practicemode", Command_ToggleCheese, "Allows you to toggle practice mode on or off.");
+	RegConsoleCmd("sm_practice", Command_ToggleCheese, "Allows you to toggle practice mode on or off.");
+	RegConsoleCmd("sm_prac", Command_ToggleCheese, "Allows you to toggle practice mode on or off.");
+
 	// RegConsoleCmd("sm_beamer", Command_Beamer, "Draw cool beams");
 
-	// RegConsoleCmd("sm_stages", Command_Stages, "Opens the stage menu. Usage: sm_stages [stage #]");
-	// RegConsoleCmd("sm_stage", Command_Stages, "Opens the stage menu. Usage: sm_stage [stage #]");
-	// RegConsoleCmd("sm_s", Command_Stages, "Opens the stage menu. Usage: sm_s [stage #]");
+	RegConsoleCmd("sm_stages", Command_Stages, "Opens the stage menu. Usage: sm_stages [stage #]");
+	RegConsoleCmd("sm_stage", Command_Stages, "Opens the stage menu. Usage: sm_stage [stage #]");
+	RegConsoleCmd("sm_s", Command_Stages, "Opens the stage menu. Usage: sm_s [stage #]");
 
-	// RegConsoleCmd("sm_back", Command_Stages, "Teleport to your last stage.");
+	RegConsoleCmd("sm_back", Command_Stages, "Teleport to your last stage.");
 
-	// RegConsoleCmd("sm_set", Command_SetStart, "Set current position as spawn location in start zone.");
-	// RegConsoleCmd("sm_setstart", Command_SetStart, "Set current position as spawn location in start zone.");
-	// RegConsoleCmd("sm_ss", Command_SetStart, "Set current position as spawn location in start zone.");
-	// RegConsoleCmd("sm_startpoint", Command_SetStart, "Set current position as spawn location in start zone.");
+	RegConsoleCmd("sm_set", Command_SetStart, "Set current position as spawn location in start zone.");
+	RegConsoleCmd("sm_setstart", Command_SetStart, "Set current position as spawn location in start zone.");
+	RegConsoleCmd("sm_ss", Command_SetStart, "Set current position as spawn location in start zone.");
+	RegConsoleCmd("sm_startpoint", Command_SetStart, "Set current position as spawn location in start zone.");
 
-	// RegConsoleCmd("sm_deletestart", Command_DeleteSetStart, "Deletes the custom set start position.");
-	// RegConsoleCmd("sm_deletesetstart", Command_DeleteSetStart, "Deletes the custom set start position.");
-	// RegConsoleCmd("sm_delss", Command_DeleteSetStart, "Deletes the custom set start position.");
-	// RegConsoleCmd("sm_delsp", Command_DeleteSetStart, "Deletes the custom set start position.");
+	RegConsoleCmd("sm_deletestart", Command_DeleteSetStart, "Deletes the custom set start position.");
+	RegConsoleCmd("sm_deletesetstart", Command_DeleteSetStart, "Deletes the custom set start position.");
+	RegConsoleCmd("sm_delss", Command_DeleteSetStart, "Deletes the custom set start position.");
+	RegConsoleCmd("sm_delsp", Command_DeleteSetStart, "Deletes the custom set start position.");
 
-	// RegConsoleCmd("sm_drawallzones", Command_DrawAllZones, "Toggles drawing all zones.");
-	// RegConsoleCmd("sm_drawzones", Command_DrawAllZones, "Toggles drawing all zones.");
+	RegConsoleCmd("sm_drawallzones", Command_DrawAllZones, "Toggles drawing all zones.");
+	RegConsoleCmd("sm_drawzones", Command_DrawAllZones, "Toggles drawing all zones.");
 	gH_DrawAllZonesCookie = new Cookie("shavit_drawallzones", "Draw all zones cookie", CookieAccess_Protected);
 
-	// RegConsoleCmd("sm_czone", Command_CustomZones, "Customize start and end zone for each track");
-	// RegConsoleCmd("sm_czones", Command_CustomZones, "Customize start and end zone for each track");
-	// RegConsoleCmd("sm_customzones", Command_CustomZones, "Customize start and end zone for each track");
+	RegConsoleCmd("sm_czone", Command_CustomZones, "Customize start and end zone for each track");
+	RegConsoleCmd("sm_czones", Command_CustomZones, "Customize start and end zone for each track");
+	RegConsoleCmd("sm_customzones", Command_CustomZones, "Customize start and end zone for each track");
+
+	AddCommandListener(OnBuildAttempt, "build");
+	AddCommandListener(OnEurekaTeleAttempt, "taunt eureka_teleport 1");
 
 	gH_CustomZoneCookie = new Cookie("shavit_customzones", "Cookie for storing custom zone stuff", CookieAccess_Private);
 
-	for (int i = 0; i <= 9; i++)
+	gH_CheeseModeCookie = new Cookie("shavit_cheese_mode", "Cookie for if a player wants to auto-strip their weapons or not.", CookieAccess_Public);
+	gH_ShownPanelCookie = new Cookie("shavit_shown_anticheese_panel", "Cookie for if a player has been shown the anticheese panel once.", CookieAccess_Public);
+
+	for (int i = 0; i < MAX_STAGES; i++)
 	{
 		char cmd[30];
 		FormatEx(cmd, sizeof(cmd), "sm_s%d%cGo to stage %d", i, 0, i); // 😈
@@ -339,6 +396,7 @@ public void OnPluginStart()
 	}
 
 	HookEvent("player_spawn", Player_Spawn);
+	HookEvent("player_teleported", OnPlayerTeleport, EventHookMode_Pre);
 
 	gI_OffsetMFEffects = FindSendPropInfo("CBaseEntity", "m_fEffects");
 
@@ -376,6 +434,8 @@ public void OnPluginStart()
 	gCV_ResetTargetnameBonus = new Convar("shavit_zones_resettargetname_bonus", "", "What targetname to use when resetting the player (on bonus tracks).\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
 	gCV_ResetClassnameMain = new Convar("shavit_zones_resetclassname_main", "", "What classname to use when resetting the player.\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
 	gCV_ResetClassnameBonus = new Convar("shavit_zones_resetclassname_bonus", "", "What classname to use when resetting the player (on bonus tracks).\nWould be applied once player teleports to the start zone or on every start if shavit_zones_forcetargetnamereset cvar is set to 1.\nYou don't need to touch this");
+
+	sv_cheats = FindConVar("sv_cheats");
 
 	gCV_SQLZones.AddChangeHook(OnConVarChanged);
 	gCV_Interval.AddChangeHook(OnConVarChanged);
@@ -433,6 +493,17 @@ public void OnPluginStart()
 				}
 			}
 		}
+	}
+}
+
+public void OnClientDisconnect(int client)
+{
+	gB_PracticeEnabled[client] = false;
+	gB_ShownPanel[client] = false;
+	if (rmvWeaponTimer[client] != INVALID_HANDLE)
+	{
+		rmvWeaponTimer[client] = INVALID_HANDLE;
+		KillTimer(rmvWeaponTimer[client]);
 	}
 }
 
@@ -1312,7 +1383,6 @@ public void OnMapStart()
 	LoadZoneSettings();
 	//UnloadZones();
 
-
 	if (gEV_Type == Engine_TF2)
 	{
 		PrecacheModel("models/error.mdl");
@@ -1962,6 +2032,32 @@ public void OnClientCookiesCached(int client)
 	{
 		return;
 	}
+
+	char cheeseMode[3];
+	gH_CheeseModeCookie.Get(client, cheeseMode, sizeof(cheeseMode));
+
+	char shownPanel[6];
+	gH_ShownPanelCookie.Get(client, shownPanel, sizeof(shownPanel));
+
+	if (cheeseMode[0] == '\0')
+	{
+		gH_CheeseModeCookie.Set(client, "Off");
+		gB_PracticeEnabled[client] = false;
+	}
+	else if (StrEqual(cheeseMode, "On"))
+		gB_PracticeEnabled[client] = true;
+	else
+		gB_PracticeEnabled[client] = false;
+
+	if (shownPanel[0] == '\0')
+	{
+		gH_ShownPanelCookie.Set(client, "false");
+		gB_ShownPanel[client] = false;
+	}
+	else if (StrEqual(shownPanel, "false"))
+		gB_ShownPanel[client] = false;
+	else
+		gB_ShownPanel[client] = true;
 
 	char setting[8];
 	gH_DrawAllZonesCookie.Get(client, setting, sizeof(setting));
@@ -2734,8 +2830,6 @@ public Action Command_Zones(int client, int args)
 		return Plugin_Handled;
 	}
 
-	// RefreshTrackNames();
-
 	if(!IsValidClient(client))
 	{
 		return Plugin_Handled;
@@ -3071,11 +3165,15 @@ void OpenHookMenu_Editor(int client)
 	Menu menu = new Menu(MenuHandler_HookZone_Editor);
 	menu.SetTitle("%s\nhammerid = %s\n%s = '%s'\norigin = %s\n ", classname, hammerid, form == ZoneForm_trigger_teleport ? "target" : "targetname", targetname, sOrigin);
 
-	char display[128], buf[32];
+	char display[128], buf[64];
 
 	FormatEx(display, sizeof(display), "%T\n ", "ZoneHook_Tpto", client);
 	menu.AddItem("tpto", display);//, form == ZoneForm_trigger_teleport ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT);
 
+	if (Shavit_GetCustomTrackName(client, track, buf, sizeof(buf)))
+		PrintToServer("Track has custom name");
+	else
+		PrintToServer("track has default name");
 	FormatEx(display, sizeof(display), "%T", "ZoneEditTrack", client, buf);
 	menu.AddItem("track", display);
 	GetZoneName(client, zonetype, buf, sizeof(buf));
@@ -4968,6 +5066,10 @@ public Action Timer_DrawZones(Handle Timer, any drawAll)
 		return Plugin_Continue;
 	}
 
+	if (sv_cheats != null)
+		if (sv_cheats.IntValue == 0)
+			return Plugin_Continue;
+
 	static int iCycle[2];
 	static int iMaxZonesPerFrame = 5;
 
@@ -5602,7 +5704,14 @@ int GetStageZoneIndex(int track, int stage, int start = 0)
 
 public void Player_Spawn(Event event, const char[] name, bool dontBroadcast)
 {
-	Reset(GetClientOfUserId(event.GetInt("userid")));
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	Reset(client);
+
+	int mapType = SNT_CheckMapType();
+	if (!gB_PracticeEnabled[client] && mapType != 2)
+		EnableAnticheese(client);
+	else
+		DisableAnticheese(client);
 }
 
 public void Round_Start(Event event, const char[] name, bool dontBroadcast)
@@ -5761,15 +5870,6 @@ public void StartTouchPost(int entity, int other)
 			}
 		}
 
-		case Zone_Jail:
-		{
-			if(status != Timer_Stopped && !bReplay)
-			{
-				Shavit_StopTimer(other);
-				Shavit_PrintToChat(other, "%T", "ZoneJailEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2);
-			}
-		}
-
 		case Zone_Stop:
 		{
 			if (status != Timer_Stopped && !bReplay)
@@ -5781,38 +5881,32 @@ public void StartTouchPost(int entity, int other)
 
 		case Zone_Start:
 		{
-			int primaryWep = GetPlayerWeaponSlot(other, 0);
-			int secondaryWep = GetPlayerWeaponSlot(other, 1);
-
-			if ((primaryWep != -1) && (secondaryWep != -1))
+			if (IsValidClient(other))
 			{
-				int primaryWepIndex = TF2_GetItemDefinitionIndexSafe(primaryWep);
-				int secondaryWepIndex = TF2_GetItemDefinitionIndexSafe(secondaryWep);
-				
-				if (primaryWepIndex == TF_ROCKETJUMPER)
-					Shavit_PrintToChat(other, "%sYour time will not count on this track while you use the rocket jumper!", gS_ChatStrings.sWarning);
-				
-				if (secondaryWepIndex == TF_STICKYJUMPER)
-					Shavit_PrintToChat(other, "%sYour time will not count on this track while you use the sticky jumper!", gS_ChatStrings.sWarning);
+				if (!gB_ShownPanel[other])
+				{
+					Panel rmvWepPanel = CreatePanel();
+					rmvWepPanel.SetTitle("Enable Practice Mode?");
+					rmvWepPanel.DrawText("Your times will not count in practice mode.");
+					rmvWepPanel.DrawText("If you disable practice mode, you will not be able to teleport");
+					rmvWepPanel.DrawText("Rocket/Sticky jump, be airblasted, trimp, or use hype.");
+					rmvWepPanel.DrawText(" ");
+					rmvWepPanel.DrawText("If you do not answer within 10 seconds practice mode will be enabled by default.");
+					rmvWepPanel.DrawText("You can toggle practice mode typing /practice");
+					rmvWepPanel.DrawText(" ");
+					rmvWepPanel.DrawItem("Enable");
+					rmvWepPanel.DrawItem("No Thanks");
+					rmvWepPanel.Send(other, rmvWeapons_Panel, 10.0);
+					rmvWeaponTimer[other] = CreateTimer(10.0, rmvWeapons_Timer, other);
+					gB_ShownPanel[other] = true;
+					gH_ShownPanelCookie.Set(other, "true");
+					delete rmvWepPanel;
+				}
 			}
 		}
 
 		case Zone_End:
-		{
-			int primaryWep = GetPlayerWeaponSlot(other, 0);
-			int secondaryWep = GetPlayerWeaponSlot(other, 1);
-			if (primaryWep != -1 && secondaryWep != -1)
-			{
-				int primaryWepIndex = TF2_GetItemDefinitionIndexSafe(primaryWep);
-				int secondaryWepIndex = TF2_GetItemDefinitionIndexSafe(secondaryWep);
-
-				if ((primaryWepIndex == TF_ROCKETJUMPER) || (secondaryWepIndex == TF_STICKYJUMPER))
-				{
-					Shavit_StopTimer(other);
-					return;
-				}
-			}
-
+		{	
 			if (!bReplay && status == Timer_Running && Shavit_GetClientTrack(other) == track)
 			{
 				Shavit_FinishMap(other, track);
@@ -5904,6 +5998,244 @@ public void StartTouchPost(int entity, int other)
 	Call_Finish();
 }
 
+public Action rmvWeapons_Timer (Handle timer, any client)
+{
+	if (IsValidClient(client))
+	{
+		gH_CheeseModeCookie.Set(client, "On");
+		DisableAnticheese(client);
+	}
+	rmvWeaponTimer[client] = INVALID_HANDLE;
+	return Plugin_Continue;
+}
+
+public any Native_CheckPracticeMode (Handle plugin, int numParams)
+{
+	int client = GetNativeCell(1);
+	return gB_PracticeEnabled[client];
+}
+
+public Action Command_ToggleCheese (int client, int args)
+{
+	if (SNT_CheckMapType() == 2)
+	{
+		Shavit_PrintToChat(client, "%sPractice mode is not available on arena maps", gS_ChatStrings.sVariable);
+		DisableAnticheese(client);
+		return Plugin_Handled;
+	}
+
+	if (client == 0 || !IsValidClient(client))
+		return Plugin_Handled;
+	
+	if (args == 0)
+	{
+		if (!gB_PracticeEnabled[client])
+		{
+			DisableAnticheese(client);
+			Shavit_PrintToChat(client, "%sTurned practice mode on.", gS_ChatStrings.sVariable);
+		}
+		else
+		{
+			EnableAnticheese(client);
+			Shavit_PrintToChat(client, "%sTurned practice mode off.", gS_ChatStrings.sVariable);
+		}
+	}
+
+	return Plugin_Handled;
+}
+
+void EnableAnticheese(int client)
+{
+	if (IsValidClient(client))
+	{
+		gB_PracticeEnabled[client] = false;
+		gH_CheeseModeCookie.Set(client, "Off");
+		SDKHook(client, SDKHook_OnTakeDamage, SDKHookCB_OnTakeDamage);
+		SetEntProp(client, Prop_Send, "m_CollisionGroup", 2);
+
+		int wearable = (MaxClients + 1);
+		while ((wearable = FindEntityByClassname(wearable, "tf_wearable")) != -1)
+		{
+			if (GetEntPropEnt(wearable, Prop_Send, "m_hOwnerEntity") != client)
+				continue;
+
+			// check for Mantreads
+			int itemIndex = GetEntProp(wearable, Prop_Send, "m_iItemDefinitionIndex");
+			if (itemIndex == 444)
+				TF2Attrib_SetByName(wearable, "mod_air_control_blast_jump", 1.0);
+		}
+
+		for (int i; i < 3; i++)
+		{
+			int weaponInSlot = GetPlayerWeaponSlot(client, i);
+			if (weaponInSlot != -1)
+			{
+				TF2Attrib_SetByName(weaponInSlot, "no double jump", 1.0);
+				TF2Attrib_SetByName(weaponInSlot, "increased jump height from weapon", 1.0);
+				TF2Attrib_SetByName(weaponInSlot, "scattergun has knockback", 0.0);
+				TF2Attrib_AddCustomPlayerAttribute(client, "scattergun has knockback", 0.0);
+				TF2Attrib_SetByName(weaponInSlot, "parachute attribute", 0.0);
+				TF2Attrib_SetByName(weaponInSlot, "airblast vulnerability multiplier", 0.0);
+			}
+		}
+	}
+}
+
+void DisableAnticheese(int client)
+{
+	if (IsValidClient(client))
+	{
+		gB_PracticeEnabled[client] = true;
+		gH_CheeseModeCookie.Set(client, "On");
+		SDKUnhook(client, SDKHook_OnTakeDamage, SDKHookCB_OnTakeDamage);
+		SetEntProp(client, Prop_Send, "m_CollisionGroup", 5);
+
+		int wearable = (MaxClients + 1);
+		while ((wearable = FindEntityByClassname(wearable, "tf_wearable")) != -1)
+		{
+			if (GetEntPropEnt(wearable, Prop_Send, "m_hOwnerEntity") != client)
+				continue;
+
+			// check for Mantreads
+			int itemIndex = GetEntProp(wearable, Prop_Send, "m_iItemDefinitionIndex");
+			if (itemIndex == 444)
+				TF2Attrib_RemoveByName(wearable, "mod_air_control_blast_jump");
+		}
+
+		TFClassType class = TF2_GetPlayerClass(client);
+		if (class == TFClass_Pyro)
+		{
+			// Let player use the jetpack again.
+			int playerWeapon = GetPlayerWeaponSlot(client, 1);
+			
+			char classname[64];
+			GetEntityClassname(playerWeapon, classname, sizeof(classname));
+
+			if (StrEqual(classname, "tf_weapon_rocketpack"))
+				SetEntPropFloat(playerWeapon, Prop_Send, "m_flNextSecondaryAttack", 0.0);
+		}
+
+		TF2Attrib_AddCustomPlayerAttribute(client, "scattergun has knockback", 1.0);
+
+		for (int i; i < 3; i++)
+		{
+			int weaponInSlot = GetPlayerWeaponSlot(client, i);
+			if (weaponInSlot != -1)
+				TF2Attrib_RemoveAll(weaponInSlot);
+		}
+	}
+}
+
+public Action SDKHookCB_OnTakeDamage (int victim, int& attacker, int& inflictor, float& damage, int& damagetype)
+{
+	if ((victim == attacker) && !Shavit_CheckPracticeMode(victim))
+		return Plugin_Stop;
+
+	return Plugin_Continue;
+}
+
+public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+{
+	if (!gB_PracticeEnabled[client])
+	{
+		float walkSpeed = GetEntPropFloat(client, Prop_Send, "m_flMaxspeed");
+		if (walkSpeed > 229)
+			SetEntPropFloat(client, Prop_Send, "m_flMaxspeed", 300.0);
+		
+		if (TF2_IsPlayerInCondition(client, TFCond_AirCurrent))
+			TF2_RemoveCondition(client, TFCond_AirCurrent);
+
+		TFClassType class = TF2_GetPlayerClass(client);
+		if (class == TFClass_Scout)
+		{
+			SetEntPropFloat(client, Prop_Send, "m_flHypeMeter", 90.0);
+			SetEntPropFloat(client, Prop_Send, "m_flChargeMeter", 90.0);
+		}
+		else if (class == TFClass_Pyro)
+		{
+			int playerWeapon = GetPlayerWeaponSlot(client, 1);
+			
+			char classname[64];
+			GetEntityClassname(playerWeapon, classname, sizeof(classname));
+
+			if (StrEqual(classname, "tf_weapon_rocketpack"))
+				SetEntPropFloat(playerWeapon, Prop_Send, "m_flNextSecondaryAttack", 72000.0);
+		}
+		else if (class == TFClass_DemoMan)
+			SetEntPropFloat(client, Prop_Send, "m_flChargeMeter", 90.0);
+	}
+
+	return Plugin_Continue;
+}
+
+public Action OnBuildAttempt (int client, const char[] command, int argc)
+{
+	if (!gB_PracticeEnabled[client])
+		return Plugin_Handled;
+	
+	return Plugin_Continue;
+}
+
+public Action OnEurekaTeleAttempt (int client, const char[] command, int argc)
+{
+	if (!gB_PracticeEnabled[client])
+		return Plugin_Handled;
+	
+	return Plugin_Continue;
+}
+
+public int rmvWeapons_Panel(Menu menu, MenuAction action, int param1, int param2)
+{
+	switch (action)
+	{
+		case MenuAction_Select:
+		{
+			if (Shavit_GetTimerStatus(param1) != Timer_Stopped)
+				Shavit_StopTimer(param1);
+
+			if (param2 == 1)
+			{
+				if (rmvWeaponTimer[param1] != INVALID_HANDLE)
+				{
+					KillTimer(rmvWeaponTimer[param1]);
+					rmvWeaponTimer[param1] = INVALID_HANDLE;
+				}
+				gH_CheeseModeCookie.Set(param1, "Off");
+				EnableAnticheese(param1);
+				Shavit_PrintToChat(param1, "%sPractice mode is turned off, good luck!", gS_ChatStrings.sImproving);
+				return 0;
+			}
+			else if (param2 == 2)
+			{
+				if (rmvWeaponTimer[param1] != INVALID_HANDLE)
+				{
+					KillTimer(rmvWeaponTimer[param1]);
+					rmvWeaponTimer[param1] = INVALID_HANDLE;
+				}
+				gH_CheeseModeCookie.Set(param1, "On");
+				DisableAnticheese(param1);
+				Shavit_PrintToChat(param1, "%sThe timer will still run, but your time will not count.", gS_ChatStrings.sWarning);
+				return 0;
+			}
+		}
+	}
+	return 0;
+}
+
+public Action OnPlayerTeleport (Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(GetEventInt(event, "userid"));
+	TimerStatus status = Shavit_GetTimerStatus(client);
+	if (status == Timer_Running && !gB_PracticeEnabled[client])
+	{
+		Shavit_StopTimer(client);
+		Shavit_PrintToChat(client, "%sNo cheating!", gS_ChatStrings.sWarning);
+		return Plugin_Stop;
+	}
+
+	return Plugin_Continue;
+}
+
 public Action SameTrack_StartTouch_er(int entity, int other)
 {
 	if (other < 1 || other > MaxClients || IsFakeClient(other))
@@ -5929,6 +6261,7 @@ public void EndTouchPost(int entity, int other)
 
 	int type = gA_ZoneCache[entityzone].iType;
 	int track = gA_ZoneCache[entityzone].iTrack;
+	
 
 	if (type < 0 || track < 0) // odd
 	{
@@ -5948,23 +6281,24 @@ public void EndTouchPost(int entity, int other)
 
 		case Zone_Start:
 		{
-			if(Shavit_GetClientTrack(other) == track && Shavit_GetTimerStatus(other) == Timer_Running)
-			{
-				float fSpeed[3];
-				GetEntPropVector(other, Prop_Data, "m_vecVelocity", fSpeed);
-				float curVel = SquareRoot(Pow(fSpeed[0], 2.0) + Pow(fSpeed[1], 2.0));
-				float speed = GetVectorLength(fSpeed);
-
-				bool valid = true;
-				Shavit_SetStageTimeValid(other, valid);
-
-				if ((Shavit_GetHUDSettings(other) & HUD_SPEEDTRAP > 0) && curVel >= 15.0 && Shavit_GetClientTime(other) < 1.0)
+			if (track != prevTrack[other])
+				if(Shavit_GetClientTrack(other) == track && Shavit_GetTimerStatus(other) == Timer_Running)
 				{
-					Shavit_StopChatSound();
-					Shavit_PrintToChat(other, "You started [%s%s%s]", 
-					gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText);
+					float fSpeed[3];
+					GetEntPropVector(other, Prop_Data, "m_vecVelocity", fSpeed);
+					float curVel = SquareRoot(Pow(fSpeed[0], 2.0) + Pow(fSpeed[1], 2.0));
+					// float speed = GetVectorLength(fSpeed);
+
+					bool valid = true;
+					Shavit_SetStageTimeValid(other, valid);
+
+					if ((Shavit_GetHUDSettings(other) & HUD_SPEEDTRAP > 0) && curVel >= 15.0 && Shavit_GetClientTime(other) < 1.0)
+					{
+						Shavit_StopChatSound();
+						Shavit_PrintToChat(other, "You started [%s%s%s]", 
+						gS_ChatStrings.sVariable, currentTrackInfo[track].trackName, gS_ChatStrings.sText);
+					}
 				}
-			}
 		}
 			
 		case Zone_Stage:
@@ -5994,6 +6328,8 @@ public void EndTouchPost(int entity, int other)
 			}
 		}
 	}
+
+	prevTrack[other] = gA_ZoneCache[entityzone].iTrack;
 
 	Call_StartForward(gH_Forwards_LeaveZone);
 	Call_PushCell(other);
@@ -6032,13 +6368,9 @@ public void TouchPost(int entity, int other)
 	// do precise stuff here, this will be called *A LOT*
 	switch (type)
 	{
+
 		case Zone_Stage:
 		{
-			if (GetEntPropEnt(other, Prop_Send, "m_hGroundEntity") == -1 && !Shavit_GetStyleSettingBool(Shavit_GetBhopStyle(other), "startinair"))
-			{
-				return;
-			}
-
 			Shavit_StartStageTimer(other, track, gA_ZoneCache[zone].iData);
 		}
 		case Zone_Start:
@@ -6124,13 +6456,14 @@ public void TouchPost(int entity, int other)
 				Shavit_PrintToChat(other, "%T", "ZoneSlayEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, gS_ChatStrings.sWarning);
 			}
 		}
+
 		case Zone_Jail:
 		{
-			if(Shavit_GetTimerStatus(other) != Timer_Stopped)
-			{
+			if (!gB_PracticeEnabled[other])
+				DisableAnticheese(other);
+
+			if (Shavit_GetTimerStatus(other) != Timer_Stopped)
 				Shavit_StopTimer(other);
-				Shavit_PrintToChat(other, "%T", "ZoneJailEnter", other, gS_ChatStrings.sWarning, gS_ChatStrings.sVariable2, gS_ChatStrings.sWarning);
-			}
 		}
 
 		case Zone_Stop:

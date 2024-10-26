@@ -26,9 +26,12 @@
 
 enum struct payout_info
 {
-	int iWorldRecord;
-	int iNewPersonalBest;
-	int iRegularFinish;
+	float fWRPts;
+	float fPBPts;
+	float fRegPts;
+	int   iWRCred;
+	int   iPBCred;
+	int   iRegCred;
 }
 
 /**
